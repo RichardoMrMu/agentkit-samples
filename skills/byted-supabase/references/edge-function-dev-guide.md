@@ -123,6 +123,10 @@ Deno.serve(async (req: Request) => {
 
 Edge Function 可以通过 Supabase SDK 或直接使用环境变量中的连接信息访问数据库：
 
+默认情况下，应使用 `SUPABASE_ANON_KEY` 搭配请求中的用户 JWT，让数据库 RLS
+执行最终的数据访问控制。`Access-Control-Allow-Origin: *` 只处理浏览器跨域
+策略，不是身份认证或授权机制，不能替代 JWT 校验。
+
 ```typescript
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -137,23 +141,31 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // 使用环境变量创建 Supabase 客户端
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // 如果需要以用户身份访问（尊重 RLS）
     const authHeader = req.headers.get('Authorization');
-    if (authHeader) {
-      const userToken = authHeader.replace('Bearer ', '');
-      const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, {
-        global: { headers: { Authorization: `Bearer ${userToken}` } },
+    const tokenMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    if (!tokenMatch) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
-      // 使用 userClient 进行受 RLS 保护的操作
     }
 
-    // 示例：查询数据
-    const { data, error } = await supabase
+    // 使用 anon key 搭配用户 JWT；后续查询会尊重 RLS
+    const userClient = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: `Bearer ${tokenMatch[1]}` } } },
+    );
+    const { data: user, error: userError } = await userClient.auth.getUser();
+    if (userError || !user.user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { data, error } = await userClient
       .from('posts')
       .select('*')
       .order('created_at', { ascending: false })
@@ -171,6 +183,32 @@ Deno.serve(async (req: Request) => {
     });
   }
 });
+```
+
+### 受信任后台任务
+
+只有在调用方已经是受信任的后台服务，并且应用层已经完成鉴权、授权和
+最小权限过滤时，才使用 `SUPABASE_SERVICE_ROLE_KEY`。该密钥会绕过 RLS，
+不能放在客户端，也不应直接暴露给不可信调用者。下面的
+`assertTrustedBackendRequest` 代表项目自己的服务间认证逻辑，不能省略或
+用 CORS 配置替代：
+
+```typescript
+const serviceClient = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+);
+
+// 必须先校验服务身份、调用权限和租户范围
+await assertTrustedBackendRequest(req);
+const tenantId = await getAuthorizedTenantId(req);
+
+const { data, error } = await serviceClient
+  .from('posts')
+  .select('*')
+  .eq('tenant_id', tenantId)
+  .order('created_at', { ascending: false })
+  .limit(10);
 ```
 
 ---
@@ -246,20 +284,88 @@ Deno.serve(async (req: Request) => {
 
 ### Webhook 处理器
 
+如果函数通过 `--no-verify-jwt` 部署为公开入口，必须使用 Webhook
+提供方的共享密钥验证签名，不能只检查签名请求头是否存在。下面示例使用
+`HMAC-SHA256`，签名内容为 `timestamp.nonce.body`，并拒绝超出时间窗口的
+请求。生产环境还必须将 nonce 持久化到数据库或其他共享存储中，拒绝已处理
+的 nonce；仅使用内存集合无法跨实例可靠防重放。
+
 ```typescript
+const encoder = new TextEncoder();
+const maxWebhookAgeSeconds = 300;
+
+function hexToBytes(value: string): Uint8Array | null {
+  if (!/^[0-9a-f]{64}$/i.test(value)) return null;
+  const bytes = new Uint8Array(32);
+  for (let index = 0; index < bytes.length; index++) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function timingSafeEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index++) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference === 0;
+}
+
+async function verifyWebhook(
+  body: string,
+  timestamp: string,
+  nonce: string,
+  signature: string,
+): Promise<boolean> {
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isInteger(timestampSeconds)) return false;
+  if (Math.abs(Date.now() / 1000 - timestampSeconds) > maxWebhookAgeSeconds) {
+    return false;
+  }
+
+  const secret = Deno.env.get('WEBHOOK_SECRET');
+  if (!secret || !nonce || nonce.length > 256) return false;
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const expected = new Uint8Array(
+    await crypto.subtle.sign(
+      'HMAC',
+      key,
+      encoder.encode(`${timestamp}.${nonce}.${body}`),
+    ),
+  );
+  const provided = hexToBytes(signature);
+  return provided !== null && timingSafeEqual(expected, provided);
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
   }
 
   try {
-    const payload = await req.json();
-
-    // 验证 Webhook 签名（根据实际来源调整）
+    // 必须验证原始请求体；解析 JSON 后重新序列化可能改变签名内容
+    const body = await req.text();
+    const timestamp = req.headers.get('x-webhook-timestamp') ?? '';
+    const nonce = req.headers.get('x-webhook-nonce') ?? '';
     const signature = req.headers.get('x-webhook-signature');
-    if (!signature) {
+    if (
+      !signature ||
+      !(await verifyWebhook(body, timestamp, nonce, signature)) ||
+      !(await isUnprocessedWebhookNonce(nonce))
+    ) {
       return new Response('Unauthorized', { status: 401 });
     }
+
+    // isUnprocessedWebhookNonce 必须使用持久化共享存储，并在成功处理前原子占用 nonce
+    const payload = JSON.parse(body);
 
     // 处理事件
     console.log('Received webhook:', payload.type);

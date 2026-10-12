@@ -1,7 +1,7 @@
 ---
 name: byted-supabase
-description: Manage Volcengine's AI-native BaaS platform (Supabase edition / 火山引擎 AI 原生 BaaS 平台 Supabase 版) — a Volcengine-operated distribution that differs from official Supabase. Covers workspaces, branches, SQL queries, schema changes, Auth, Realtime, Edge Functions, Storage, frontend static-site hosting, and TypeScript type generation through the byted-supabase-cli command-line tool (installed via `npm i -g @byted-supabase/cli`; this is NOT the official `supabase` CLI). Run byted-supabase-cli subcommands to get real-time results. Use this skill when the user needs to create, inspect, or manage Volcengine Supabase resources (workspaces, databases, branches, Auth, Realtime, Edge Functions, Storage, frontend deployment, API keys, or type generation). Do NOT use it for general database discussions, non-Supabase services, or pure client-side coding unrelated to Supabase backend management.
-version: 2.3.3
+description: 火山引擎 Supabase . 管理 AIDAP Supabase 项目、工作区、数据库、分支、Auth、Realtime、Edge Functions、Storage、API Keys、SQL、Schema 变更、TypeScript 类型生成和 MCP 集成。
+version: 2.3.8
 license: Apache-2.0
 metadata:
   openclaw:
@@ -31,6 +31,8 @@ metadata:
 - 直接调用 **`byted-supabase-cli`** 命令行工具获取实时结果
 - 基于返回结果做解释、排障和下一步建议
 
+
+
 ## 核心原则
 
 > 本节为通用工作纪律，**任何 Supabase 任务都应遵守**。
@@ -50,7 +52,7 @@ metadata:
 暂停后的实例**无法靠客户 IO / 访问流量自动唤醒**（这与分支休眠的「访问即唤醒」**本质不同**）——整个 workspace 及其下**所有分支**停服，REST / Auth / Storage / 直连 DB **全部不可达**，必须由人**手动** `projects start` 才能恢复。因此执行 `projects stop` 前**必须**：
 > 1. **向用户明确复述影响并取得二次确认**——「这会停掉整个 workspace `<ref>`，期间客户业务完全不可用、且不会自动恢复，确认吗？」
 > 2. **核对目标 `ref` 无误**，绝不停错 workspace；
-> 3. **绝不**把它当作「重启 / 休眠 / 省资源」的手段——重启用 `branches restart`，休眠是平台自动行为，二者都**不会**导致业务停服。
+> 3. **绝不**把它当作「重启 / 休眠 / 省资源」的手段——workspace 休眠/唤醒用 `projects sleep`/`projects wake`，算力重启/自动休眠配置用 `computes restart`/`projects settings`，二者都**不会**等同于 workspace 暂停。
 >
 > （`projects delete` 同属不可逆高危操作，同样需先确认。）
 
@@ -80,6 +82,7 @@ metadata:
 - 需要配置 **Auth（认证）** 或使用 **Realtime（实时）**
 - 需要部署或管理 **Edge Functions**
 - 需要操作 **Storage Bucket**（创建、删除、查看配置、上传/下载对象）
+- 需要运行隔离代码、执行 AI Coding Agent、上传文件或管理临时 **Sandbox**
 - 需要**部署前端静态站点**（并按需与 Supabase 后端打通）
 - 需要获取 Supabase 项目的 **API Key** 或 **连接信息**
 - 需要为 Supabase 数据库 **生成 TypeScript 类型定义**
@@ -105,7 +108,9 @@ byted-supabase-cli <command> --help  # 任何子命令都可加 --help 看参数
 
 ## 鉴权与前置条件
 
-`byted-supabase-cli` 用**火山引擎凭据**鉴权。**优先使用 CLI 自带的配置 / 登录方式**（写入 `~/.volcengine/config.json`，一次配置长期复用）：
+鉴权方式取决于运行模式：
+
+- **火山账号方式**使用火山引擎凭据。**优先使用 CLI 自带的配置 / 登录方式**（写入 `~/.volcengine/config.json`，一次配置长期复用）：
 
 **方式 1 · CLI 配置 / 登录（推荐）**
 
@@ -146,10 +151,11 @@ export VOLCENGINE_SESSION_TOKEN=<token>    # 可选：使用临时凭据时才�
 
 ## 标准使用流程
 
-1. 先确认目标资源：`workspace_id`（必要时 `branch_id`）
-2. 优先执行**只读查询**，确认现状（`projects list`、`db query "select ..."` 等）
-3. 需要变更时再执行写操作；破坏性操作（删除/停机）在非交互环境需加 `--yes`，**执行前向用户确认**。⛔ 尤其 `projects stop`（暂停 workspace）属高危红线——客户业务会彻底停服且无法靠 IO 自动唤醒，务必先二次确认（见[核心原则 5](#核心原则)）
-4. 变更后**再次查询**确认结果已生效（对应[核心原则 2](#核心原则)）
+1. 先执行 `byted-supabase-cli link status -o json`，读 `type` 字段确认当前是火山账号方式（`management`）还是分支 URL + Key 方式（`solo`）。
+2. **Workspace 模式**：确认 `workspace_id`（必要时 `branch_id`），优先执行只读查询（如 `projects list`、`db query "select ..."`）。
+3. **分支 URL + Key 方式**：确认已 link 的 Supabase URL；根据操作需要确认 anon key、service-role key 或 database URL 是否已配置，优先执行只读查询（如 `storage buckets list`、`functions list`、`auth config get`）。
+4. 需要变更时再执行写操作；破坏性操作（删除/停机）在非交互环境需加 `--yes`，**执行前向用户确认**。⛔ 尤其 Workspace 模式的 `projects stop`（暂停 workspace）属高危红线——客户业务会彻底停服且无法靠 IO 自动唤醒，务必先二次确认（见[核心原则 5](#核心原则)）。
+5. 变更后**再次查询**确认结果已生效（对应[核心原则 2](#核心原则)）。
 
 ## 能力范围（动作 → CLI 命令）
 
@@ -162,8 +168,10 @@ export VOLCENGINE_SESSION_TOKEN=<token>    # 可选：使用临时凭据时才�
 | 列出 workspace | `projects list` |
 | workspace 详情 / 概览 | `projects list --workspace-id ws-... --detail` ／ `projects overview` |
 | 创建 workspace | `projects create <name>`（region 走全局/env/profile）。**创建成功后必须主动说明休眠超时并非阻塞询问**，见下方「💤 休眠超时」 |
-| 调整算力 / 休眠超时 | `projects compute-settings <ref> --min-cu <n> --max-cu <n> [--suspend-timeout-seconds <秒>]`（底层 ModifyComputeSettings；**设休眠超时用 `--service-type Supabase --min-cu 0.5`**，见下方💤）。**改完不要用 `projects list --detail` 校验是否生效**——那里的算力字段是 Database 服务的值，改的是 Supabase 服务会显示"未变"；正确校验用 `computes list --workspace-id <ref> --service-type Supabase -o json`，见 [tool-reference](references/tool-reference.md) |
-| ⛔ 暂停 / 恢复**整个 workspace**（停机/开机，**高危**，见[核心原则 5](#核心原则)） | `projects stop <ref>` ／ `projects start <ref>` |
+| 配置算力自动休眠 | `projects settings compute <ref> --min-cu <n> --max-cu <n> [--suspend-timeout-seconds <秒>]`（底层 ModifyComputeSettings；**设置算力自动休眠超时用 `--service-type Supabase --min-cu 0.5`**，见下方💤）。该命令只修改配置，不会立即让 workspace 或 compute 进入休眠。 |
+| 立即休眠整个 workspace | `projects sleep --workspace-id <workspace-id> --yes`（底层 SuspendWorkspace；这是 workspace 休眠，不是暂停） |
+| 唤醒休眠 workspace | `projects wake --workspace-id <workspace-id> --yes`（先调用 DescribeWorkspaceEndpoint 获取 `AddressDomain`，再访问一次 Supabase 实例触发唤醒） |
+| ⛔ 暂停 / 恢复**整个 workspace**（停机/开机，**高危**，见[核心原则 5](#核心原则)） | `projects stop --workspace-id <workspace-id>` ／ `projects start --workspace-id <workspace-id>` |
 | 删除 workspace | `projects delete <ref> --yes` |
 | 获取 API Keys | `projects api-keys --workspace-id ws-...` |
 | 获取访问地址 / 连接串 | `endpoints list --workspace-id ws-...` ／ `db connection-string --workspace-id ws-...` |
@@ -171,8 +179,33 @@ export VOLCENGINE_SESSION_TOKEN=<token>    # 可选：使用临时凭据时才�
 > **💤 休眠超时（SuspendTimeoutSeconds）—— 创建后务必主动说明、非阻塞询问。**
 > - **含义**：分支算力**无流量自动休眠（scale-to-zero）前的空闲等待秒数**。到点自动休眠，下次访问 exposeURL（或任意请求）即**自动唤醒**（冷启动）——这是「休眠」而**非**「暂停 workspace」（区别见[下方辨析](#分支branch)与[核心原则 5](#核心原则)）。
 > - **取值语义**：`-1` = 显式关闭自动休眠（算力常驻 / 永不休眠）；`0` = 未设置的平台默认（行为上等同常驻）；`300`–`604800` 秒（5 分钟–7 天）= 启用，空闲到点休眠。**新建 workspace 默认不休眠**（`projects list --detail` 显示为 `0`）。想**关闭**已开启的自动休眠就传 `-1`（不是 `0`）。
-> - **修改方式**：`projects compute-settings <ref> --service-type Supabase --min-cu 0.5 --max-cu 2 --suspend-timeout-seconds <秒> --yes`。⚠️ 必带 `--yes` + `--min-cu`/`--max-cu`，且 Supabase 服务 min CU 下限 0.5——这几个坑照抄即可，细节见 [tool-reference 的「💤 休眠超时」](references/tool-reference.md)。
+> - **修改方式**：`projects settings compute <ref> --service-type Supabase --min-cu 0.5 --max-cu 2 --suspend-timeout-seconds <秒> --yes`。⚠️ 必带 `--yes` + `--min-cu`/`--max-cu`，且 Supabase 服务 min CU 下限 0.5——这几个坑照抄即可，细节见 [tool-reference 的「💤 休眠超时」](references/tool-reference.md)。
 > - **创建后协议（非阻塞）**：`projects create` 成功后，**主动向用户解释**上面的含义并**非阻塞地**提示是否设置休眠超时，可直接用这段话：「关于空闲休眠：当前算力常驻、不会自动休眠—稳定但更耗资源。如果想节省算力，可配置空闲自动休眠时间（再次访问无需手动操作，Supabase 自动唤醒），推荐 1 小时。」**推荐 1 小时（`--suspend-timeout-seconds 3600`）**；用户没回应或表示不需要就保持默认不休眠，**不要因此卡住或阻塞**后续流程。
+
+### AI Gateway
+
+AI Gateway 提供 Workspace 分支的大模型访问、图片生成、Seedance 视频生成的能力。涉及 AI Gateway 的任务，先阅读完整指南 [`references/ai-gateway.md`](references/ai-gateway.md)，再根据需要执行：
+
+- 模型/端点查询：`ai-gateway status`、`ai-gateway models list`
+- OpenAI 兼容调用：`ai-gateway chat completions`
+- 图片生成：参考指南中的 Images API 示例
+- 额度管理：`ai-gateway quota get`、`quota set-default`、`quota users list/get/set`
+- 用量汇总：`ai-gateway usage`
+
+指南包含 Supabase Auth `access_token`、Third-Party Auth JWT、后端 `service_role_key` 的 JavaScript/Python 接入 Demo，以及额度单位、图片模型尺寸和排障说明。命令和参数以 `byted-supabase-cli ai-gateway --help` 为准。
+
+### Sandbox（隔离执行）
+
+涉及运行不可信代码、隔离测试、AI Coding Agent、临时服务或 Sandbox 文件操作时，先阅读 [`references/sandbox-guide.md`](references/sandbox-guide.md)。
+
+- 先检查 `byted-supabase-cli --version` 和 `sandbox --help`，命令不存在就 `byted-supabase-cli update`。
+- 一次性任务和调试用 CLI 的 `create`、`connect`、`exec`、`kill`；应用内连续执行、后台任务用 E2B 兼容 SDK。
+- **e2b SDK 必须低于 2.51**（Node `e2b@2.50.0`，Python 由 `byted_supabase_sandbox` 约束）：2.51 起改走 `/v2/sandboxes`，网关 6.9.1 之前返回 404。Node SDK 要先 `npm pack` 再装 tgz，不要直接装目录。
+- 创建身份三选一：用户 session（推荐）、后端 service_role + `ownerUserId`、service_role + `PassServiceRoleJwtToSandbox`（绕过 RLS，慎用）。anon key 不能当 `apiKey`。
+- 严格区分管理面凭据、CLI 的 `envdAccessToken`、用户 session token 和 service_role key；`sandboxID` 和 token 只放环境变量，不输出。执行结束或失败后都要 kill。
+- 后台命令必须 `timeoutMs: 0`，启动后立即 `disconnect()`。
+- 结果要看 `exit_code` / `status` 和 stdout / stderr，外层命令成功不代表沙箱内任务成功。
+- 端口预览地址默认持有即可访问，只交给沙箱归属者；遇到 401、501、502 按参考文档的常见问题排查。
 
 ### 分支（branch）
 
@@ -180,11 +213,13 @@ export VOLCENGINE_SESSION_TOKEN=<token>    # 可选：使用临时凭据时才�
 |------|------|
 | 列出 / 创建 / 删除分支 | `branches list` ／ `branches create <name>` ／ `branches delete <branch-id>` |
 | 查看 / 设默认分支 | `branches get <id>` ／ `branches get-default` ／ `branches set-default <id>` |
-| **重启**分支算力（reboot）/ 时间点恢复 | `branches restart <id>` ／ `branches restore <id> --restore-time <ts>` |
+| **重启**分支算力（reboot）/ 时间点恢复 | `computes restart <branch-id> [--compute-id <compute-id>]` ／ `branches restore <id> --restore-time <ts>` |
 
 > **⚠️ 暂停 / 重启 / 休眠 三者别混淆**（最常见的误判）：
-> - **重启**分支算力（"重启""reboot""重启算力"）→ `branches restart <id>`，一条命令搞定；**切勿**用 `projects stop` + `projects start` 模拟（那是整个 workspace 停机再开机）。
-> - **休眠 / 唤醒** = 分支算力的**平台自动行为**：空闲到点自动 scale-to-zero、访问即自动唤醒（**无需手动命令**）；阈值可配，详见上方[💤 休眠超时](#工作区workspace--project)。想手动重置算力用 `branches restart`，**别用 `projects stop` 代替**。
+> - **重启**分支算力（"重启""reboot""重启算力"）→ `computes restart <id> [--compute-id <compute-id>]`，底层 `RestartBranch`；**切勿**用 `projects stop` + `projects start` 模拟（那是整个 workspace 停机再开机）。
+> - **workspace 休眠** = `projects sleep`，调用 `SuspendWorkspace`，让整个 workspace 进入休眠；**不要**用 `projects stop` 代替。
+> - **workspace 唤醒** = `projects wake`，先通过 `DescribeWorkspaceEndpoint` 获取 `AddressDomain`，再访问 Supabase 实例一次触发唤醒；不要用 `projects start`，后者对应显式暂停后的恢复。
+> - **算力自动休眠** = 通过 `projects settings` 设置 `SuspendTimeoutSeconds`，由平台按空闲时间自动执行；这不是算力重启，也不是立即 workspace 休眠。
 > - **⛔ 暂停 / 恢复** = **workspace 级**停机/开机（`projects stop` / `projects start`），影响其下**所有分支**。**高危红线**：停后客户业务彻底不可用且**无法靠 IO 自动唤醒**，必须人工 `projects start`——执行 `projects stop` 前务必复述影响并二次确认（详见[核心原则 5](#核心原则)）。
 >
 > 一句话记忆：**休眠/重启 → 客户访问能自愈或单命令恢复（低危）；暂停 → 客户访问救不回来，只能人工 start（高危，先确认）。**
@@ -272,6 +307,7 @@ export VOLCENGINE_SESSION_TOKEN=<token>    # 可选：使用临时凭据时才�
 | 文档 | 用途 |
 |------|------|
 | [`references/tool-reference.md`](references/tool-reference.md) | 命令速查：动作 → CLI + 等价 SQL |
+| [`references/ai-gateway.md`](references/ai-gateway.md) | AI Gateway 接入 Demo、图片生成、额度管理与排障 |
 | [`references/workflows.md`](references/workflows.md) | 常见操作流程（巡检 / 变更 / 发布） |
 | [`references/sql-playbook.md`](references/sql-playbook.md) | 常用 SQL 示例（CRUD / JOIN / pgvector / RPC） |
 | [`references/app-integration-guide.md`](references/app-integration-guide.md) | 接入 TS/Python 应用：SDK 初始化 + CRUD + Auth + Realtime |
@@ -282,6 +318,10 @@ export VOLCENGINE_SESSION_TOKEN=<token>    # 可选：使用临时凭据时才�
 | [`references/pg-best-practices/index.md`](references/pg-best-practices/index.md) | Postgres 性能与最佳实践（索引 / 连接 / 锁 / 监控等） |
 | [`references/edge-function-dev-guide.md`](references/edge-function-dev-guide.md) | Edge Function 编写与部署 |
 | [`references/sdk-pitfalls.md`](references/sdk-pitfalls.md) | SDK 与查询常见陷阱（URL 长度限制 / 错误捕获 / 索引评估） |
+| [`references/sandbox-guide.md`](references/sandbox-guide.md) | Sandbox CLI/SDK 生命周期、凭据边界与失败诊断 |
+| [`examples/hello-world-node/`](examples/hello-world-node/) | Node.js Sandbox SDK 最小完整示例：注册/登录用户、创建 Sandbox、执行命令并回收 |
+| [`examples/hello-world-python/`](examples/hello-world-python/) | Python Sandbox SDK 最小完整示例：注册/登录用户、创建 Sandbox、执行命令并回收 |
+| `scripts/sandbox-cli-lifecycle.sh`、`scripts/sandbox-node.mjs`、`scripts/sandbox-python.py` | Sandbox CLI 生命周期和 Node/Python 完整示例 |
 
 > 📚 **Postgres 最佳实践细分**（均由上方 [`index.md`](references/pg-best-practices/index.md) 索引，可按需直达）：[`query.md`](references/pg-best-practices/query.md) · [`conn.md`](references/pg-best-practices/conn.md) · [`security.md`](references/pg-best-practices/security.md) · [`schema.md`](references/pg-best-practices/schema.md) · [`lock.md`](references/pg-best-practices/lock.md) · [`data.md`](references/pg-best-practices/data.md) · [`monitor.md`](references/pg-best-practices/monitor.md) · [`advanced.md`](references/pg-best-practices/advanced.md)
 

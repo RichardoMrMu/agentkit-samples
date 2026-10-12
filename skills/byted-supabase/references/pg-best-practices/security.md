@@ -110,8 +110,11 @@ as $$
   );
 $$;
 
--- 回收 public 角色的直接执行权限
-revoke execute on function private.is_team_member(bigint) from PUBLIC, anon, authenticated, service_role;
+-- 回收默认公开及匿名角色的直接执行权限
+revoke execute on function private.is_team_member(bigint) from PUBLIC, anon;
+
+-- RLS 策略由 authenticated 角色评估，因此必须保留函数执行权限
+grant execute on function private.is_team_member(bigint) to authenticated;
 
 -- 在策略中使用（走索引查找，而非逐行判断）
 create policy team_orders_policy on orders
