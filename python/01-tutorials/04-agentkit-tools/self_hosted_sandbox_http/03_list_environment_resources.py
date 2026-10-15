@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""List resources with filters and optional traversal of next_page cursors."""
+"""List resources with filters and optional traversal of NextToken cursors."""
 
 from _common import (
     EnvironmentResourceHttpClient,
@@ -15,7 +15,6 @@ def main() -> None:
     cli = parser(__doc__)
     cli.add_argument("--target-type", choices=("ark", "agentkit"))
     cli.add_argument("--environment-id")
-    cli.add_argument("--resource-mode", choices=("sandbox_only", "runtime_and_sandbox"))
     cli.add_argument(
         "--status",
         choices=(
@@ -30,24 +29,27 @@ def main() -> None:
     )
     cli.add_argument("--include-deleted", action="store_true")
     cli.add_argument(
-        "--limit", type=positive_int, help="Page size, 1-100 (server default: 20)"
+        "--max-results",
+        type=positive_int,
+        help="Page size, 1-100 (server default: 100)",
     )
-    cli.add_argument("--page", help="Opaque next_page value from the previous response")
     cli.add_argument(
-        "--all", action="store_true", help="Follow next_page until exhausted"
+        "--next-token", help="Opaque NextToken value from the previous response"
+    )
+    cli.add_argument(
+        "--all", action="store_true", help="Follow NextToken until exhausted"
     )
     args = cli.parse_args()
-    if args.limit is not None and args.limit > 100:
-        cli.error("--limit must be between 1 and 100")
+    if args.max_results is not None and args.max_results > 100:
+        cli.error("--max-results must be between 1 and 100")
     body = {
         key: getattr(args, key)
         for key in (
             "target_type",
             "environment_id",
-            "resource_mode",
             "status",
-            "limit",
-            "page",
+            "max_results",
+            "next_token",
         )
         if getattr(args, key) is not None
     }
@@ -59,15 +61,15 @@ def main() -> None:
     if args.dry_run:
         return
     client = EnvironmentResourceHttpClient()
-    seen = {args.page} if args.page else set()
+    seen = {args.next_token} if args.next_token else set()
     page_number = 0
     total = 0
     while True:
         response = client.list_environment_resources(body)
-        if not isinstance(response.get("data"), list):
-            raise RuntimeError("ListEnvironmentResources response is missing data[]")
+        if not isinstance(response.get("items"), list):
+            raise RuntimeError("ListEnvironmentResources response is missing Items[]")
         page_number += 1
-        total += len(response["data"])
+        total += len(response["items"])
         emit(
             {
                 "phase": "page",
@@ -78,15 +80,15 @@ def main() -> None:
             },
             json_output=args.json_output,
         )
-        page = response.get("next_page")
-        if not args.all or not page:
+        token = response.get("next_token")
+        if not args.all or not token:
             return
-        if not isinstance(page, str) or page in seen:
+        if not isinstance(token, str) or token in seen:
             raise RuntimeError(
-                "ListEnvironmentResources returned an invalid or repeated next_page"
+                "ListEnvironmentResources returned an invalid or repeated NextToken"
             )
-        seen.add(page)
-        body["page"] = page
+        seen.add(token)
+        body["next_token"] = token
 
 
 if __name__ == "__main__":

@@ -15,7 +15,6 @@ from urllib.parse import quote, urlencode, urlsplit
 
 import requests
 
-
 API_VERSION = "2025-10-30"
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_HTTP_RETRIES = 2
@@ -389,40 +388,63 @@ def _snake_case(value: str) -> str:
     return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value).lower()
 
 
-def normalize_resource_response(value: Any) -> Any:
-    """Normalize TOP PascalCase fields to the scripts' snake_case contract.
+def _pascal_case(value: str) -> str:
+    if value in {"agentkit", "agent_kit"}:
+        return "AgentKit"
+    return "".join(part[:1].upper() + part[1:] for part in value.split("_"))
 
-    The TOP list uses EnvironmentResources instead of data. Opaque maps in
-    the specification belong to the caller and must retain their exact keys.
-    This applies to responses only; request bodies and IAM are unchanged.
-    """
+
+def _wire_enum(value: Any) -> Any:
+    return _pascal_case(value) if isinstance(value, str) else value
+
+
+def _wire_value(value: Any, path: tuple[str, ...] = ()) -> Any:
+    """Convert the script model to the published TOP JSON shape."""
     if isinstance(value, list):
-        return [normalize_resource_response(item) for item in value]
+        if path == ("update_mask",):
+            return [
+                ".".join(_pascal_case(part) for part in item.split("."))
+                if isinstance(item, str)
+                else item
+                for item in value
+            ]
+        return [_wire_value(item, path) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if path and (path[-1] == "env_vars" or path == ("sandbox", "networking")):
+        return dict(value)
+    result = {}
+    for key, item in value.items():
+        if item is None and key not in {"description"}:
+            continue
+        wire_item = _wire_value(item, (*path, key))
+        if key in {"type", "target_type", "status"}:
+            wire_item = _wire_enum(wire_item)
+        result[_pascal_case(key)] = wire_item
+    return result
+
+
+def wire_request(body: dict[str, Any]) -> dict[str, Any]:
+    """Map one snake_case request to the public PascalCase wire contract."""
+    return _wire_value(body)
+
+
+def normalize_resource_response(value: Any, path: tuple[str, ...] = ()) -> Any:
+    """Normalize TOP PascalCase fields to the scripts' snake_case model."""
+    if isinstance(value, list):
+        return [normalize_resource_response(item, path) for item in value]
     if not isinstance(value, dict):
         return value
     result = {}
     for key, item in value.items():
-        if key == "EnvironmentResources":
-            field = "data"
-        elif key == "RequestId":
-            field = key
-        else:
-            field = _snake_case(key)
+        field = _snake_case(key)
+        child_path = (*path, field)
         normalized = (
             item
-            if field in {"env_vars", "resources", "networking", "agentkit"}
-            else normalize_resource_response(item)
+            if field == "env_vars" or child_path == ("config", "networking")
+            else normalize_resource_response(item, child_path)
         )
-        if isinstance(normalized, str) and field in {
-            "status",
-            "step",
-            "type",
-            "resource_mode",
-            "profile",
-            "provider",
-            "ownership",
-            "runtime_type",
-        }:
+        if isinstance(normalized, str) and field in {"status", "type"}:
             normalized = _snake_case(normalized)
         if field in result and result[field] != normalized:
             raise RuntimeError(f"conflicting response fields for {field}")
@@ -450,9 +472,10 @@ class EnvironmentResourceHttpClient:
         )
 
     def call(self, action: str, body: dict[str, Any]) -> dict[str, Any]:
-        payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode(
-            "utf-8"
-        )
+        wire_body = wire_request(body)
+        payload = json.dumps(
+            wire_body, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
         url = request_url(action)
         for attempt in range(self.retries + 1):
             if self.endpoint and self.credentials:
@@ -508,18 +531,26 @@ class EnvironmentResourceHttpClient:
         if isinstance(value, dict):
             if action == "ListEnvironmentResources":
                 valid = (
-                    isinstance(value.get("data"), list)
+                    isinstance(value.get("items"), list)
                     and all(
                         isinstance(item, dict)
                         and isinstance(item.get("resource_id"), str)
                         and bool(item["resource_id"])
-                        for item in value["data"]
+                        and isinstance(item.get("status"), str)
+                        and bool(item["status"])
+                        for item in value["items"]
                     )
                     and (
-                        value.get("next_page") is None
-                        or isinstance(value["next_page"], str)
+                        value.get("next_token") is None
+                        or isinstance(value["next_token"], str)
                     )
                 )
+            elif action == "DeleteEnvironmentResource":
+                valid = isinstance(value.get("resource_id"), str) and bool(
+                    value["resource_id"]
+                )
+                if valid:
+                    value["status"] = "deleting"
             else:
                 valid = (
                     isinstance(value.get("resource_id"), str)
@@ -553,7 +584,7 @@ class EnvironmentResourceHttpClient:
             f"Result type={type(result.get('Result')).__name__}; "
             f"Result fields={sorted(raw_value) if isinstance(raw_value, dict) else []}; "
             f"RequestId={request_id or '-'}. "
-            "Expected a resource object or data[]/EnvironmentResources[] list, plain or inside Result. "
+            "Expected a resource object, a delete ResourceId, or an Items[]/NextToken list inside Result. "
             + advice
         )
 

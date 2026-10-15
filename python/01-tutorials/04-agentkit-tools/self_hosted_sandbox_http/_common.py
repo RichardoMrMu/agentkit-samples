@@ -75,23 +75,17 @@ def status_label(value: Any) -> str:
 
 
 def operation_failed(value: dict[str, Any]) -> bool:
-    operation = value.get("last_operation") or {}
-    return value.get("status") in {"failed", "delete_failed"} or str(
-        operation.get("status", "")
-    ).startswith("failed")
+    return value.get("status") in {"failed", "delete_failed"} or bool(
+        value.get("error_code")
+    )
 
 
 def operation_completed(value: dict[str, Any], wanted: str) -> bool:
-    operation = value.get("last_operation") or {}
-    return (
-        value.get("status") == wanted
-        and operation.get("status") == "completed"
-        and (
-            wanted == "deleted"
-            or operation.get("step") == "metadata"
-            or value.get("desired_generation") == value.get("observed_generation")
-        )
-    )
+    if value.get("status") != wanted or value.get("error_code"):
+        return False
+    if wanted == "deleted":
+        return True
+    return value.get("desired_generation") == value.get("observed_generation")
 
 
 def emit(event: dict[str, Any], *, json_output: bool = False) -> None:
@@ -127,15 +121,13 @@ def emit(event: dict[str, Any], *, json_output: bool = False) -> None:
         if body.get("client_token"):
             hint(f"本次请求 token: {body['client_token']}（重试时复用）")
         if body.get("role_name"):
-            hint(
-                f"Runtime IAM Role: {body['role_name']}（创建重试时用 --role-name 复用）"
-            )
+            hint(f"Runtime IAM Role: {body['role_name']}（重试时用 --role-name 复用）")
         if phase == "dry_run":
             hint("查看完整请求: 添加 --json")
         return
     if phase == "page":
         response = event["response"]
-        items = response["data"]
+        items = response["items"]
         hint(
             f"[查询完成] 第 {event['page_number']} 页，{len(items)} 条资源，累计 {event['total']} 条。"
         )
@@ -143,14 +135,13 @@ def emit(event: dict[str, Any], *, json_output: bool = False) -> None:
             hint("本页没有符合条件的资源。")
         for item in items:
             hint(
-                f"  {item['resource_id']} | {status_label(item.get('status'))} | 版本 {item.get('revision', '-')} | 环境 {item.get('environment_id') or item.get('target', {}).get('environment_id', '-')}"
+                f"  {item['resource_id']} | {status_label(item.get('status'))} | 版本 {item.get('revision', '-')} | 环境 {item.get('environment_id', '-')}"
             )
-            operation = item.get("last_operation") or {}
             if operation_failed(item):
                 hint(
-                    f"    最近操作失败: {operation.get('error_code') or operation.get('status') or item.get('status')}"
+                    f"    最近操作失败: {item.get('error_code') or item.get('status')}"
                 )
-        if response.get("next_page"):
+        if response.get("next_token"):
             hint(
                 "还有下一页，正在继续查询..."
                 if event.get("all_pages")
@@ -158,14 +149,13 @@ def emit(event: dict[str, Any], *, json_output: bool = False) -> None:
             )
         return
     response = event.get("response", event)
-    operation = response.get("last_operation") or {}
     if phase == "poll":
         prefix = "[失败]" if operation_failed(response) else "[进度]"
         hint(
-            f"{prefix} {response['resource_id']} | {status_label(response.get('status'))} | 操作: {operation.get('status', '-')}"
+            f"{prefix} {response['resource_id']} | {status_label(response.get('status'))}"
             + (
-                f" | 错误: {operation['error_code']}"
-                if operation.get("error_code")
+                f" | 错误: {response['error_code']}"
+                if response.get("error_code")
                 else ""
             )
         )
@@ -192,12 +182,8 @@ def emit(event: dict[str, Any], *, json_output: bool = False) -> None:
         if response.get(key):
             hint(f"{name}: {response[key]}")
     if operation_failed(response):
-        hint(
-            f"失败原因: {operation.get('error_code') or operation.get('status') or response.get('status')}"
-        )
-        if operation.get("status") == "failed_clean":
-            hint("操作已回滚；请排查失败原因后再发起新操作。")
-        hint("查看组件详情: python 02_get_environment_resource.py --json")
+        hint(f"失败原因: {response.get('error_code') or response.get('status')}")
+        hint("查看资源详情: python 02_get_environment_resource.py --json")
     if event.get("state_file"):
         hint(f"状态已保存: {event['state_file']}")
     if (
@@ -328,14 +314,13 @@ def load_state() -> dict[str, Any]:
     path = state_path()
     if not path.is_file():
         raise RuntimeError(
-            "state file is missing; run Create/Get first, or pass --resource-id "
-            "and --expected-revision for Update/Delete"
+            "state file is missing; run Create/Get first, or pass --resource-id"
         )
     state = json.loads(path.read_text())
     if not isinstance(state, dict) or state.get("endpoint") != endpoint_scope():
         raise RuntimeError(
             "state belongs to another endpoint; select another AGENTKIT_RESOURCE_STATE "
-            "or supply the resource ID and revision explicitly"
+            "or supply the resource ID explicitly"
         )
     return state
 
@@ -353,8 +338,8 @@ def resource_id(args: argparse.Namespace, state: dict[str, Any] | None = None) -
     return value
 
 
-def mutation_resource(args: argparse.Namespace) -> dict[str, Any]:
-    """Resolve ID and revision from one state snapshot, with explicit overrides."""
+def update_resource(args: argparse.Namespace) -> dict[str, Any]:
+    """Resolve the update ID and revision from one consistent state snapshot."""
     selected_id = args.resource_id or os.getenv("AGENTKIT_RESOURCE_ID", "").strip()
     state = load_state() if not selected_id or args.expected_revision is None else None
     rid = resource_id(args, state)
@@ -387,9 +372,9 @@ def save_resource(response: dict[str, Any]) -> None:
             "resource_id",
             "revision",
             "status",
-            "operation_id",
             "desired_generation",
             "observed_generation",
+            "error_code",
         )
     }
     state["endpoint"] = endpoint_scope()
@@ -427,12 +412,10 @@ def wait_for_resource(
     interval = _positive_int_env("AGENTKIT_POLL_INTERVAL_SECONDS", 5)
     deadline = time.monotonic() + timeout
     value = initial
-    operation_id = (initial or {}).get("operation_id")
     while True:
         if value is None:
             value = client.get_environment_resource({"resource_id": rid})
         save_resource(value)
-        operation = value.get("last_operation") or {}
         emit(
             {
                 "phase": "poll",
@@ -441,20 +424,14 @@ def wait_for_resource(
                 "revision": value.get("revision"),
                 "desired_generation": value.get("desired_generation"),
                 "observed_generation": value.get("observed_generation"),
-                "last_operation": operation,
+                "error_code": value.get("error_code"),
             },
             json_output=json_output,
         )
-        if operation_id and value.get("operation_id") != operation_id:
-            raise RuntimeError(
-                "another operation replaced the submitted operation; inspect Get before continuing"
-            )
         if operation_failed(value):
             raise RuntimeError(
-                "resource operation failed (possibly rolled back); inspect last_operation and components.history"
+                "resource operation failed; inspect status and error_code"
             )
-        # A rolled-back update can return ready while its operation failed and
-        # observed_generation still refers to the previous working generation.
         if operation_completed(value, wanted):
             return value
         if value.get("status") == "deleted" and wanted != "deleted":
@@ -489,9 +466,7 @@ def submit(
         json_output=args.json_output,
     )
     if operation_failed(response):
-        raise RuntimeError(
-            "resource operation failed (possibly rolled back); inspect last_operation and components.history"
-        )
+        raise RuntimeError("resource operation failed; inspect status and error_code")
     if args.wait:
         response = wait_for_resource(
             client,

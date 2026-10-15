@@ -4,14 +4,15 @@
 from _common import (
     add_target_argument,
     json_object,
-    mutation_resource,
     parser,
     positive_int,
     required_env,
     run,
     submit,
+    update_resource,
     validate_env_vars,
 )
+from _iam_roles import prepare_runtime_role
 
 
 def main() -> None:
@@ -40,11 +41,17 @@ def main() -> None:
         type=json_object,
         help="JSON object or @file.json; existing environment policies still apply",
     )
+    cli.add_argument(
+        "--runtime-resources",
+        type=json_object,
+        help="Replace Ark Runtime CPU/memory resources (JSON or @file)",
+    )
+    cli.add_argument("--role-name", help="Replace the Ark Runtime IAM role")
     args = cli.parse_args()
     if args.target_type not in {"ark", "agentkit"}:
         cli.error("AGENTKIT_RESOURCE_TARGET must be ark or agentkit")
     body = {
-        **mutation_resource(args),
+        **update_resource(args),
         "client_token": args.client_token,
         "update_mask": [],
     }
@@ -67,14 +74,30 @@ def main() -> None:
             body["update_mask"].append(f"sandbox.{field}")
     if sandbox:
         body["sandbox"] = sandbox
-        if args.target_type == "ark":
-            body["target"] = {
-                "environment_key": required_env(
-                    "AGENTKIT_ENVIRONMENT_KEY", dry_run=args.dry_run
-                )
-            }
+    if args.runtime_resources is not None:
+        if args.target_type != "ark":
+            cli.error("--runtime-resources is only supported for ark")
+        body["runtime"] = {"resources": args.runtime_resources}
+        body["update_mask"].append("runtime.resources")
+    if args.role_name is not None:
+        if args.target_type != "ark":
+            cli.error("--role-name is only supported for ark")
+        role_name = args.role_name.strip()
+        if not role_name:
+            cli.error("--role-name must not be empty")
+        body["role_name"] = prepare_runtime_role(role_name, dry_run=args.dry_run)
+        body["update_mask"].append("role_name")
     if not body["update_mask"]:
         cli.error("provide at least one field to update")
+    if args.target_type == "ark" and any(
+        path.startswith(("sandbox.", "runtime.")) or path == "role_name"
+        for path in body["update_mask"]
+    ):
+        body["target"] = {
+            "environment_key": required_env(
+                "AGENTKIT_ENVIRONMENT_KEY", dry_run=args.dry_run
+            )
+        }
     submit("UpdateEnvironmentResource", body, args)
 
 

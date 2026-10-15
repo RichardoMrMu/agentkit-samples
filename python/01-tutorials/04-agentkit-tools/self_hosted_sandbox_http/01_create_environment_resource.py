@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an EnvironmentResource group; optionally wait for its components."""
+"""Create an EnvironmentResource; optionally wait for generation convergence."""
 
 import os
 
@@ -14,7 +14,6 @@ from _common import (
 )
 from _iam_roles import prepare_runtime_role
 
-
 DEFAULT_ARK_SANDBOX_IMAGE = (
     "enterprise-public-cn-beijing.cr.volces.com/vefaas-public/"
     "agentkit-selfhostsandbox:tool-ark-skills-0.0.2"
@@ -28,7 +27,11 @@ DEFAULT_ARK_RUNTIME_IMAGE = (
 def main() -> None:
     cli = parser(__doc__, mutation=True)
     add_target_argument(cli)
-    cli.add_argument("--name")
+    cli.add_argument(
+        "--name",
+        default=os.getenv("AGENTKIT_RESOURCE_NAME", "self-hosted-sandbox-http"),
+        help="Resource name (default: AGENTKIT_RESOURCE_NAME or self-hosted-sandbox-http)",
+    )
     cli.add_argument("--description")
     cli.add_argument(
         "--role-name",
@@ -50,6 +53,17 @@ def main() -> None:
         "--sandbox-env-vars", type=json_object, help="JSON object or @file.json"
     )
     cli.add_argument(
+        "--sandbox-resources", type=json_object, help="JSON object or @file.json"
+    )
+    cli.add_argument(
+        "--sandbox-networking", type=json_object, help="JSON object or @file.json"
+    )
+    cli.add_argument(
+        "--runtime-resources",
+        type=json_object,
+        help="Ark Runtime CPU/memory JSON object or @file.json",
+    )
+    cli.add_argument(
         "--skill-space-id", default=os.getenv("AGENTKIT_SKILL_SPACE_ID", "")
     )
     args = cli.parse_args()
@@ -57,6 +71,11 @@ def main() -> None:
         cli.error("AGENTKIT_RESOURCE_TARGET must be ark or agentkit")
     if args.target_type == "agentkit" and args.runtime_image:
         cli.error("--runtime-image is only supported for ark")
+    if args.target_type == "agentkit" and args.runtime_resources is not None:
+        cli.error("--runtime-resources is only supported for ark")
+    args.name = args.name.strip()
+    if not args.name:
+        cli.error("--name / AGENTKIT_RESOURCE_NAME must not be empty")
     if args.role_name is not None:
         args.role_name = args.role_name.strip()
         if not args.role_name:
@@ -66,30 +85,24 @@ def main() -> None:
 
     body = {
         "client_token": args.client_token,
-        "resource_mode": "runtime_and_sandbox"
-        if args.target_type == "ark"
-        else "sandbox_only",
+        "name": args.name,
         "target": {
             "type": args.target_type,
             "environment_id": required_env(
                 "AGENTKIT_ENVIRONMENT_ID", dry_run=args.dry_run
             ),
         },
-        "sandbox": {
-            "profile": "ark_skills" if args.target_type == "ark" else "ma_infra"
-        },
     }
-    if args.name is not None:
-        body["name"] = args.name
     if args.description is not None:
         body["description"] = args.description
     if args.region:
         body["region"] = args.region
+    sandbox = {}
     sandbox_image = args.sandbox_image
     if sandbox_image is None and args.target_type == "ark":
         sandbox_image = DEFAULT_ARK_SANDBOX_IMAGE
     if sandbox_image:
-        body["sandbox"]["image_url"] = sandbox_image
+        sandbox["image_url"] = sandbox_image
     if args.sandbox_env_vars is not None or args.skill_space_id:
         env_vars = validate_env_vars(args.sandbox_env_vars or {})
         if args.skill_space_id:
@@ -101,7 +114,13 @@ def main() -> None:
                     "--skill-space-id conflicts with sandbox.env_vars.SKILL_SPACE_ID"
                 )
             env_vars["SKILL_SPACE_ID"] = args.skill_space_id
-        body["sandbox"]["env_vars"] = env_vars
+        sandbox["env_vars"] = env_vars
+    if args.sandbox_resources is not None:
+        sandbox["resources"] = args.sandbox_resources
+    if args.sandbox_networking is not None:
+        sandbox["networking"] = args.sandbox_networking
+    if sandbox:
+        body["sandbox"] = sandbox
     if args.target_type == "ark":
         body["target"].update(
             {
@@ -118,12 +137,18 @@ def main() -> None:
             if args.runtime_image is None
             else args.runtime_image
         )
-        body["runtime"] = {"image_url": runtime_image} if runtime_image else {}
+        runtime = {"image_url": runtime_image} if runtime_image else {}
+        if args.runtime_resources is not None:
+            runtime["resources"] = args.runtime_resources
+        body["runtime"] = runtime
         role_name = prepare_runtime_role(
             args.role_name, dry_run=args.dry_run, region=args.region
         )
-        if role_name:
-            body["role_name"] = role_name
+        if not role_name:
+            cli.error(
+                "--role-name is required for Ark when the transport cannot select a Volcengine IAM role"
+            )
+        body["role_name"] = role_name
     submit("CreateEnvironmentResource", body, args)
 
 
