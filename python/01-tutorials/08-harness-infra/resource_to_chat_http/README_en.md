@@ -186,7 +186,10 @@ Cleanup refuses to continue while the Session is still active.
 
 ## Output and Timeouts
 
-- Default output is a concise Chinese summary; `--json` emits redacted events.
+- Default output numbers creation, chat, and cleanup steps (`1, 2, 3…`). Each step keeps the resource name (when available), ID, core parameters, and status under one heading. Questions and answers use Chinese labels (`问 / 答`). Final summaries list names, IDs, and statuses without repeating parameters.
+- Reused, deleted, and skipped resources also include their identifiers; Sessions include their title. Older state files reuse saved names without inventing missing metadata. API Keys show only names, IDs, and bindings. `--dry-run` lists numbered actions and explicitly marks names and IDs as not yet obtained.
+- Creation requests (Endpoint, Environment, Harness, RuntimeTemplate, API Key, and Session), model conversations, and deletion waits use a single-line spinner in a terminal, then print the result once the target status (such as Ready) is reached. Redirected output and `--json` only log status changes. JSON events remain redacted and include a `step` field for numbered steps.
+- Script 03 numbers its six cleanup steps: Session / API Key checks, RuntimeTemplate deletion, EnvironmentResource deletion, Environment deletion, Harness archival, and completion. Missing or already cleaned resources are explicitly skipped; the Endpoint is retained.
 - `HARNESS_INFRA_HTTP_TIMEOUT_SECONDS`: control request timeout, default 60.
 - `HARNESS_INFRA_DATA_TIMEOUT_SECONDS`: data request timeout, default 60.
 - `HARNESS_INFRA_WAIT_TIMEOUT_SECONDS`: asynchronous wait timeout, default 900.

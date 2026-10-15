@@ -15,12 +15,14 @@ def main() -> None:
             "控制面清理计划",
             json_output=args.json_output,
             actions=[
-                "DeleteRuntimeTemplate",
-                "DeleteEnvironmentResource",
-                "DeleteEnvironment",
+                "检查 Session / 清理残留 API Key",
+                "DeleteRuntimeTemplate / 等待删除完成",
+                "DeleteEnvironmentResource / 等待 Deleted",
+                "DeleteEnvironment / 等待删除完成",
                 "ArchiveHarness",
                 "retain Endpoint",
             ],
+            status="dry_run（未查询资源，名称和 ID 未获取）",
         )
         return
     client = TopClient()

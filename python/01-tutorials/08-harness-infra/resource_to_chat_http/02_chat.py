@@ -2,7 +2,7 @@
 """创建一次性环境 Key，发起真实模型对话并回收 Session 与 Key。"""
 
 from _clients import TopClient
-from _common import emit, load_state, parser, required_setting, run
+from _common import emit, load_state, parser, required_setting, resource_info, run
 from _workflow import create_key_and_chat
 
 DEFAULT_PROMPT = "计算 17 × 23，只回复结果。"
@@ -44,6 +44,7 @@ def main() -> None:
             ],
             ark_api_key_name=ark_api_key_name,
             prompt=args.prompt,
+            status="dry_run（未查询或创建资源，名称和 ID 未获取）",
         )
         return
 
@@ -63,9 +64,18 @@ def main() -> None:
         )
     emit(
         "verified",
-        "真实模型回复校验通过",
+        "真实模型回复校验通过"
+        if args.expected_substring
+        else "真实对话完成（未启用回复内容校验）",
         json_output=args.json_output,
-        expected_substring=args.expected_substring or None,
+        step=6,
+        **{
+            **resource_info(state, "session"),
+            "parameters": {"expected_substring": args.expected_substring or "未启用"},
+            "result": "回复校验通过"
+            if args.expected_substring
+            else "对话完成，未启用内容校验",
+        },
     )
 
 

@@ -9,11 +9,13 @@ import re
 import sys
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
 from _clients import HarnessInfraError, TopClient
+from _display import console, display_error, display_event, progress_text
 
 SAFE_IDENTIFIER_KEYS = {
     "api_key_id",
@@ -65,18 +67,56 @@ def emit(
     message: str,
     *,
     json_output: bool = False,
+    step: int | None = None,
+    heading: bool = True,
     **fields: Any,
 ) -> None:
     """输出稳定的 JSON 事件，或简洁中文进度。"""
 
     event = {"phase": phase, "message": message, **fields}
+    if step is not None:
+        event["step"] = step
     if json_output:
         print_json(event)
     else:
-        hint(f"[{message}]")
-        for key, value in fields.items():
-            if value is not None:
-                hint(f"{key}: {value}")
+        display_event(
+            phase, redact(message), redact(fields), step=step, heading=heading
+        )
+
+
+@contextmanager
+def wait_progress(
+    description: str, *, json_output: bool = False
+) -> Iterator[Callable[[str | None], None]]:
+    """终端单行转圈；日志和 JSON 只记录状态变化。"""
+
+    animated = not json_output and sys.stdout.isatty() and os.getenv("TERM") != "dumb"
+    previous: object = object()
+    spinner = (
+        console.status(
+            progress_text(redact(description)), spinner="dots", spinner_style="cyan"
+        )
+        if animated
+        else nullcontext(None)
+    )
+    with spinner as progress:
+
+        def update(status: str | None) -> None:
+            nonlocal previous
+            if status == previous:
+                return
+            previous = status
+            if progress is not None:
+                progress.update(progress_text(redact(description), redact(status)))
+            else:
+                emit(
+                    "poll",
+                    f"等待 {description}",
+                    json_output=json_output,
+                    status=status,
+                )
+
+        yield update
 
 
 def required_setting(
@@ -231,8 +271,98 @@ def update_resource(
 ) -> None:
     """更新一个资源的公开标识和状态，不保存完整响应。"""
 
-    state.setdefault("resources", {})[name] = value
+    resources = state.setdefault("resources", {})
+    resources[name] = {**resources.get(name, {}), **value}
     save_state(state)
+
+
+RESOURCE_LABELS = {
+    "endpoint": "Endpoint",
+    "environment": "Environment",
+    "environment_resource": "EnvironmentResource",
+    "harness": "Harness",
+    "runtime_template": "RuntimeTemplate",
+    "api_key": "API Key",
+    "session": "Session",
+}
+
+
+def resource_ref(state: dict[str, Any], key: str) -> dict[str, Any]:
+    value = state.get("resources", {}).get(key) or {}
+    name = value.get("name") or state.get("names", {}).get(key)
+    return {
+        **({"name": name} if name else {}),
+        "id": value.get("id") or "未创建或未记录",
+    }
+
+
+def resource_info(
+    state: dict[str, Any], key: str, *, compact: bool = False
+) -> dict[str, Any]:
+    """只选择公开资源信息；兼容旧状态文件中的名称和配置。"""
+    value = state.get("resources", {}).get(key) or {}
+    config = state.get("config", {})
+    parameters = dict(value.get("parameters") or {})
+    if key == "endpoint":
+        parameters.update(
+            base_url=value.get("base_url"),
+            reused=(not value.get("owned", False)) if value.get("id") else None,
+        )
+    elif key == "harness":
+        parameters.update(
+            agent_loop=config.get("agent_loop"),
+            model_id=config.get("model_id"),
+            model_base_url=config.get("model_base_url"),
+            version=value.get("version"),
+        )
+    elif key == "runtime_template":
+        parameters.update(role_name=config.get("role_name"))
+    elif key == "environment_resource":
+        parameters.update(environment=resource_ref(state, "environment"))
+        parameters.update(
+            {
+                k: value.get(k)
+                for k in ("revision", "desired_generation", "observed_generation")
+            }
+        )
+    elif key == "api_key":
+        parameters.update(
+            environment=resource_ref(state, "environment"),
+            endpoint=resource_ref(state, "endpoint"),
+        )
+    elif key == "session":
+        parameters.update(
+            {
+                k: resource_ref(state, k)
+                for k in ("harness", "environment", "runtime_template", "endpoint")
+            }
+        )
+    return {
+        "resource": RESOURCE_LABELS[key],
+        **resource_ref(state, key),
+        **({"title": value["title"]} if value.get("title") else {}),
+        **(
+            {"parameters": {k: v for k, v in parameters.items() if v is not None}}
+            if not compact
+            else {}
+        ),
+        "status": value.get("status") or "未创建或未记录",
+    }
+
+
+def report_resource(
+    state: dict[str, Any], key: str, *, json_output: bool = False, **fields: Any
+) -> None:
+    info = resource_info(state, key)
+    if "parameters" in fields:
+        fields["parameters"] = {**info["parameters"], **fields["parameters"]}
+    emit(
+        "resource",
+        RESOURCE_LABELS[key],
+        json_output=json_output,
+        heading=False,
+        **{**info, **fields},
+    )
 
 
 def wait_until(
@@ -242,29 +372,34 @@ def wait_until(
     *,
     description: str,
     json_output: bool = False,
+    report_result: bool = True,
 ) -> dict[str, Any]:
     """以统一超时轮询异步控制面资源。"""
 
     timeout = positive_int_env("HARNESS_INFRA_WAIT_TIMEOUT_SECONDS", 15 * 60)
     interval = positive_int_env("HARNESS_INFRA_POLL_INTERVAL_SECONDS", 5)
     deadline = time.monotonic() + timeout
-    while True:
-        value = fetch()
+    with wait_progress(description, json_output=json_output) as update:
+        while True:
+            value = fetch()
+            error = failed(value)
+            if error:
+                raise RuntimeError(f"{description} failed: {error}")
+            if complete(value):
+                break
+            update(value.get("Status"))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"timed out waiting for {description}")
+            time.sleep(min(interval, remaining))
+    if report_result:
         emit(
-            "poll",
-            f"等待{description}",
+            "completed",
+            description,
             json_output=json_output,
             status=value.get("Status"),
         )
-        error = failed(value)
-        if error:
-            raise RuntimeError(f"{description} failed: {error}")
-        if complete(value):
-            return value
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError(f"timed out waiting for {description}")
-        time.sleep(min(interval, remaining))
+    return value
 
 
 def parser(description: str, *, dry_run: bool = True) -> argparse.ArgumentParser:
@@ -290,8 +425,11 @@ def run(main: Callable[[], None]) -> None:
     try:
         main()
     except HarnessInfraError as exc:
-        print(f"[错误] {redact(str(exc))}", file=sys.stderr)
+        display_error(redact(str(exc)))
         raise SystemExit(1) from None
     except (RuntimeError, ValueError, OSError, TimeoutError) as exc:
-        print(f"[错误] {redact(str(exc))}", file=sys.stderr)
+        display_error(redact(str(exc)))
         raise SystemExit(1) from None
+    except KeyboardInterrupt:
+        display_error("操作已取消")
+        raise SystemExit(130) from None

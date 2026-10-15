@@ -72,6 +72,7 @@ def main() -> None:
             model_base_url=model_base_url,
             role_name=role_name,
             agent_loop=args.agent_loop,
+            status="dry_run（未创建资源，名称和 ID 尚未生成）",
         )
         return
 
@@ -88,8 +89,10 @@ def main() -> None:
         "state",
         "已初始化独立状态",
         json_output=args.json_output,
-        state_file=str(state_path()),
-        run_id=state["run_id"],
+        step=1,
+        id=state["run_id"],
+        parameters={"state_file": str(state_path()), **state["config"]},
+        status=state["status"],
     )
     create_resources(
         client,

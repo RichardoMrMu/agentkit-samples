@@ -182,7 +182,10 @@ python 03_cleanup.py
 
 ## 输出与超时
 
-- 默认输出中文摘要；`--json` 输出脱敏 JSON 事件。
+- 默认按 `1、2、3…` 编号展示创建、调用和清理步骤。每步在同一标题下列出资源的 name（有则展示）、id、核心配置/参数及状态，不再拆分“创建 / 已创建”标题；对话内容以“问 / 答”打印。汇总保留各资源的名称、ID 和状态，避免重复配置。
+- 删除、复用和跳过也展示资源标识；Session 另列 title。旧状态文件优先复用已保存的名称，未记录的信息不补造。API Key 仅展示名称、ID 和绑定关系，不展示明文。`--dry-run` 只列编号计划，并说明尚未获取名称和 ID。
+- 创建请求（含 Endpoint、Environment、Harness、RuntimeTemplate、API Key、Session）、模型对话和删除等待均在终端单行转圈，达到 Ready 等目标状态后打印结果并继续；重定向输出和 `--json` 模式只记录状态变化，不重复刷屏。`--json` 保留脱敏 JSON 事件，步骤编号放在 `step` 字段中。
+- 03 清理脚本按 1–6 展示 Session / API Key 检查、RuntimeTemplate 删除、EnvironmentResource 删除、Environment 删除、Harness 归档和完成汇总；不存在或已清理的资源会显示跳过，Endpoint 保留。
 - `HARNESS_INFRA_HTTP_TIMEOUT_SECONDS`：控制面单请求超时，默认 60 秒。
 - `HARNESS_INFRA_DATA_TIMEOUT_SECONDS`：数据面单请求超时，默认 60 秒。
 - `HARNESS_INFRA_WAIT_TIMEOUT_SECONDS`：异步资源轮询超时，默认 900 秒。
@@ -190,6 +193,22 @@ python 03_cleanup.py
 - `HARNESS_INFRA_HTTP_RETRIES`：429/503 自动重试次数，默认 2。
 
 自动重试复用完全相同的请求体和幂等 token。手动重试时也必须保持原 token 和参数。
+
+输出示例（名称和 ID 为示意值）：
+
+```text
+[5. 创建 Harness]
+- 资源: Harness
+- name: harness-chat-demo-harness
+- id: agent_demo
+- 核心配置/参数:
+  - agent_loop: adk
+  - model_id: model-demo
+  - model_base_url: https://ark.example.com/api/v3
+  - version: 1
+- 状态: Active
+```
+
 
 ## 离线测试
 
