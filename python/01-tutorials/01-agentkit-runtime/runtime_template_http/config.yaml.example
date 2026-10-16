@@ -1,0 +1,25 @@
+version: 1
+
+volcengine:
+  access_key: "your-volcengine-access-key" # 必填：火山账号 Access Key
+  secret_key: "your-volcengine-secret-key" # 必填：火山账号 Secret Key
+  region: "cn-beijing" # 按环境确认
+
+runtime_template:
+  id: "" # 禁止手填：Create 写入，Delete 清空
+  status: "" # 禁止手填：Create/Get/Update 写入，Delete 清空
+  endpoint: "" # 禁止手填：用于防止跨 Endpoint 误操作
+  name_prefix: "runtime-template-http" # 自动追加时间和随机后缀
+  description: "RuntimeTemplate HTTP 示例"
+  role_name: "AgentKitDefaultRuntimeAccess"
+  resources:
+    cpu_milli: 1000
+    memory_mib: 2048
+    min_replicas: 1
+    max_replicas: 1
+  image_url: null # null 使用平台默认镜像
+  envs:
+    LOG_LEVEL: "info" # 只能填写普通配置，禁止放入密钥
+  meta:
+    purpose: "runtime-template-http-tutorial"
+  runtime: {} # 留空使用平台默认端口和启动命令
