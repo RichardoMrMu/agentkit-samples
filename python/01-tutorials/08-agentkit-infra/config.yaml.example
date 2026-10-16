@@ -1,0 +1,95 @@
+version: 1
+
+volcengine:
+  access_key: "your-volcengine-access-key" # 必填：火山账号 Access Key
+  secret_key: "your-volcengine-secret-key" # 必填：火山账号 Secret Key
+  region: "cn-beijing" # 按环境确认
+
+session:
+  id: "" # 禁止手填：01 创建并写入，03 自动清空
+  name: "" # 禁止手填：01 根据服务端响应写入，03 自动清空
+  endpoint_base_url: "" # 禁止手填：01 写入数据面地址，03 自动清空
+  title: "Harness Infra resource-to-chat tutorial"
+  prompt: >-
+    这是一个沙箱工具能力验证，必须按顺序完成每一步，并等待每个工具返回结果。
+    1. 用 write 在 /workspace 创建 tool-use-capability.txt，内容恰好两行：left=17 和 right=23。
+    2. 用 edit 追加第三行 marker=TOOL_USE_MARKER。
+    3. 用 read 读取完整文件。
+    4. 用 grep 验证 marker 行。
+    5. 用 glob 列出 /workspace 中匹配 tool-use-*.txt 的文件。
+    6. 用 bash 执行 awk -F= '/^left=/{a=$2}/^right=/{b=$2}END{print a*b}'
+    /workspace/tool-use-capability.txt。最后只回复 TOOL USE VERIFIED 391。不要模拟工具调用。
+
+harness:
+  system_prompt: "按用户要求调用已配置工具，并基于真实工具结果简洁回答。"
+  model:
+    agent_name: "doubao-seed-evolving" # 按环境确认：方舟模型 ID
+    api_base: "https://ark.cn-beijing.volces.com/api/v3" # 按环境确认
+    api_key_name: "your-ark-api-key-name" # 必填：方舟 API Key 的 Name，不是明文
+    project_name: "default" # 按环境确认：Ark SDK 使用的方舟项目
+  agent_loop: "adk" # adk / codex / piagent
+  tools:
+    - Type: "agent_toolset_20260401"
+      DefaultConfig:
+        Enabled: false
+        PermissionPolicy:
+          Type: "always_allow"
+      Configs:
+        - Type: "write"
+          Enabled: true
+          PermissionPolicy: {Type: "always_allow"}
+        - Type: "edit"
+          Enabled: true
+          PermissionPolicy: {Type: "always_allow"}
+        - Type: "read"
+          Enabled: true
+          PermissionPolicy: {Type: "always_allow"}
+        - Type: "grep"
+          Enabled: true
+          PermissionPolicy: {Type: "always_allow"}
+        - Type: "glob"
+          Enabled: true
+          PermissionPolicy: {Type: "always_allow"}
+        - Type: "bash"
+          Enabled: true
+          PermissionPolicy: {Type: "always_allow"}
+  skills: []
+  mcp_servers: []
+
+runtime_template:
+  role_name: "AgentKitDefaultRuntimeAccess"
+  network:
+    use_private_network: false # 是否使用 VPC
+    vpc_id: "your-vpc-id" # 可选
+    subnet_id: "your-subnet-id" # 可选
+    security_group_ids: ["your-security-group-id"] # 可选
+  resources:
+    cpu_milli: 1000
+    memory_mib: 2048
+    min_replicas: 1
+    max_replicas: 1
+  image_url: null # null 使用平台默认镜像
+  envs: {}
+  runtime: {}
+
+environment:
+  type: "Cloud"
+  network:
+    use_private_network: false # 是否使用 VPC
+    vpc_id: "your-vpc-id" # 可选
+    subnet_id: "your-subnet-id" # 可选
+    security_group_ids: ["your-security-group-id"] # 可选
+  resources:
+    cpu_milli: 2000
+    memory_mb: 4096
+  package:
+    npm: []
+    apt: []
+  image_url: "null" # null 使用平台默认镜像
+  envs: {}
+  metadata:
+    purpose: "resource-to-chat-tutorial"
+  endpoint_id: "" # 可选：账号存在多个 Endpoint 时填写
+  env_api_key:
+    id: "" # 禁止手填：01 自动写入，03 自动清空
+    value: "" # 禁止手填：01 写入明文，02 复用，03 清空
