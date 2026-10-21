@@ -74,7 +74,7 @@ Comic Drama Master (comic_drama_master)
 2. Go to "Access Control" → "Users" → Create a new user → Enter "Keys" → Create a new key to obtain AK/SK
 3. For local or Docker debugging, go to the [BytePlus ModelArk Console](https://console.byteplus.com/ark/region:ark+ap-southeast-1/overview) → "API Key Management" → Create an API Key. AgentKit cloud deployment can obtain an Ark token from runtime identity.
 4. Activate the following pre-built inference endpoints:
-   - Agent model: `deepseek-v4-pro-260425`
+   - Agent model: `deepseek-v4-1-flash-260910`
    - Image generation model: `dola-seedream-5-0-pro-260628`
    - Video generation model: `dreamina-seedance-2-5-260628`
 

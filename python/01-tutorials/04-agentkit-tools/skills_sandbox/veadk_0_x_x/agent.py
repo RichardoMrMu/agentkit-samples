@@ -21,10 +21,17 @@ provider = os.getenv("CLOUD_PROVIDER")
 if provider and provider.lower() == "byteplus":
     ROOT_AGENT_INSTRUCTION = ROOT_AGENT_INSTRUCTION_EN
 
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910"
+    if (provider and provider.lower() == "byteplus")
+    or (not provider and os.getenv("BYTEPLUS_REGION"))
+    else "doubao-seed-evolving"
+)
+
 skill_space_id = os.getenv("SKILL_SPACE_ID")
 agent = Agent(
     name="skill_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", DEFAULT_MODEL_AGENT_NAME),
     instruction=ROOT_AGENT_INSTRUCTION,
     skills=[skill_space_id] if skill_space_id else [],
     tools=[execute_skills],

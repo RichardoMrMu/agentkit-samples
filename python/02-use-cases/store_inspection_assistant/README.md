@@ -26,8 +26,8 @@
 主要的火山引擎产品或 Agent 组件：
 
 - 大模型：
-  - deepseek-v4-pro-260425
-  - doubao-seed-2-0-pro-260215
+  - doubao-seed-evolving
+  - doubao-seed-evolving
 - 自定义工具
 - Identity
 - APMPlus
@@ -85,8 +85,8 @@
    - 进入"开通管理" -> "语言模型" -> 找到相应模型 -> 点击"开通服务"
    - 确认开通，等待服务生效（通常1-2分钟）
    - 开通本案例中使用到的以下模型（您也可以根据实际需求开通其他模型的预置推理接入点，并在 `agent.py`代码中指定使用的模型）
-     - `deepseek-v4-pro-260425`
-     - `doubao-seed-2-0-pro-260215`
+     - `doubao-seed-evolving`
+     - `doubao-seed-evolving`
    - 如下图所示
      ![Ark Model Service Management](../../assets/images/ark_model_service_management.jpg)
 

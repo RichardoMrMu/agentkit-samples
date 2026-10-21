@@ -11,10 +11,23 @@ from tools.check_prime import check_prime
 from tools.roll_die import roll_die
 from veadk import Agent, Runner
 
+
+def _is_byteplus() -> bool:
+    provider = os.getenv("CLOUD_PROVIDER", "").strip().lower()
+    return provider == "byteplus" or (
+        not provider and bool(os.getenv("BYTEPLUS_REGION"))
+    )
+
+
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910" if _is_byteplus() else "doubao-seed-evolving"
+)
+
+
 a2a_app = AgentkitA2aApp()
 root_agent = Agent(
     name="hello_world_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", DEFAULT_MODEL_AGENT_NAME),
     description=(
         "hello world agent that can roll a dice of 8 sides and check prime numbers."
     ),

@@ -124,7 +124,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model-name",
-        default=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+        default=os.getenv(
+            "MODEL_AGENT_NAME",
+            "deepseek-v4-1-flash-260910"
+            if os.getenv("CLOUD_PROVIDER", "").strip().lower() == "byteplus"
+            else "doubao-seed-evolving",
+        ),
         help="Runtime Agent model name.",
     )
     parser.add_argument(

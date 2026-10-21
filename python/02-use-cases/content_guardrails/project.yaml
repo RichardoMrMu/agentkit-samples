@@ -33,5 +33,5 @@ components:
   - type: sandbox
     product: AIO_Sandbox
 models:
-    - deepseek-v4-pro-260425
+    - doubao-seed-evolving
 image: agentkit-template-public-cn-beijing.cr.volces.com/template/guardrails_agent:latest

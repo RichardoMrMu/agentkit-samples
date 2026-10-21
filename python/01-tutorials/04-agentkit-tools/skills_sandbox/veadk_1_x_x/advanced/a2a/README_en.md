@@ -148,7 +148,7 @@ skill_toolset = SkillToolset(
 
 agent = Agent(
     name="skill_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-1-flash-260910"),
     instruction=ROOT_AGENT_INSTRUCTION,
     tools=[skill_toolset, invoke_skill, poll_skill],
 )

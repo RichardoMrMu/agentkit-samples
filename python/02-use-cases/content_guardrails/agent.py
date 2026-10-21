@@ -23,7 +23,18 @@ from veadk.memory.short_term_memory import ShortTermMemory
 
 
 short_term_memory = ShortTermMemory(backend="local")
-DEFAULT_MODEL_AGENT_NAME = "deepseek-v4-pro-260425"
+
+
+def _is_byteplus() -> bool:
+    provider = os.getenv("CLOUD_PROVIDER", "").strip().lower()
+    return provider == "byteplus" or (
+        not provider and bool(os.getenv("BYTEPLUS_REGION"))
+    )
+
+
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910" if _is_byteplus() else "doubao-seed-evolving"
+)
 # define your agent here
 agent: Agent = Agent(
     name="content_safety_agent",

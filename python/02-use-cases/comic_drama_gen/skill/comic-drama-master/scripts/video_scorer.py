@@ -12,10 +12,15 @@ import sys
 import requests
 
 from ark_auth import get_ark_authorization
-from model_service import get_api_base
+from model_service import get_api_base, resolve_provider
 
 _CHAT_URL = f"{get_api_base().rstrip('/')}/chat/completions"
-_EVAL_MODEL = os.environ.get("EVAL_MODEL_NAME", "deepseek-v4-pro-260425")
+_DEFAULT_EVAL_MODEL = (
+    "deepseek-v4-1-flash-260910"
+    if resolve_provider() == "byteplus"
+    else "doubao-seed-evolving"
+)
+_EVAL_MODEL = os.environ.get("EVAL_MODEL_NAME", _DEFAULT_EVAL_MODEL)
 
 _RUBRIC = """你是专业漫剧质量评审员。请对以下漫剧视频按5个维度评分（每项0-10分），并给出总体建议。
 

@@ -57,7 +57,7 @@ app_name = "customer_support_agent"
 default_user_id = "CUST001"
 
 # 默认模型设置
-default_model_name = "doubao-seed-2-1-turbo-260628"
+default_model_name = "doubao-seed-evolving"
 
 # 根据 CLOUD_PROVIDER 环境变量选择语言
 provider = os.getenv("CLOUD_PROVIDER")

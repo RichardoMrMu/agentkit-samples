@@ -87,7 +87,7 @@ customer_support/
    - Go to "Activation Management" -> "Language Models" -> Find the desired model -> Click "Activate Service".
    - Confirm activation and wait for the service to become effective (usually 1-2 minutes).
    - Activate the following models used in this case (you can also activate other models as needed and specify them in the `agent.py` code):
-      - `deepseek-v4-pro-260425`
+      - `deepseek-v4-1-flash-260910`
    - As shown below:
    ![ModelArk Service Management](../../assets/images/ark_model_service_management.jpg)
 
@@ -148,7 +148,7 @@ export DATABASE_MEM0_API_KEY=<mem0_api_key>
   - Example: `DATABASE_TOS_BUCKET=agentkit-platform-12345678901234567890`
   - `{{your_account_id}}` needs to be replaced with your BytePlus account ID.
 - `DATABASE_VIKING_COLLECTION`: The name of a pre-created knowledge base collection (recommended for production).
-- The default model is `deepseek-v4-pro-260425`. This can be changed in the code if needed.
+- The default model is `deepseek-v4-1-flash-260910`. This can be changed in the code if needed.
 
 ## Local Execution
 

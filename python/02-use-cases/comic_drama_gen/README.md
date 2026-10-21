@@ -74,7 +74,7 @@ AgentKit Runtime
 2. 进入「访问控制」→「用户」→ 新建用户 → 进入「密钥」→ 新建密钥，获取 AK/SK
 3. 本地或 Docker 调试时，进入 [火山方舟控制台](https://console.volcengine.com/ark) →「API Key 管理」→ 创建 API Key；AgentKit 云端部署可使用运行时身份自动获取 Ark token
 4. 开通以下模型的预置推理接入点：
-   - Agent 模型：`deepseek-v4-pro-260425`
+   - Agent 模型：`doubao-seed-evolving`
    - 生图模型：`doubao-seedream-5-0-pro-260628`
    - 生视频模型：`doubao-seedance-2-5-260628`
 

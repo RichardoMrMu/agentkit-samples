@@ -83,7 +83,7 @@ Key features include:
     - Search for the "BytePlus ModelArk" product and click to enter the console
     - Go to "Activation Management" -> "Language Models" -> Find the corresponding model -> Click "Activate Service"
     - Activate the following models used in this case
-        - root_agent model: `deepseek-v4-pro-260425`
+        - root_agent model: `deepseek-v4-1-flash-260910`
         - Image generation model: `dola-seedream-5-0-pro-260628`
         - Video generation model: `dreamina-seedance-2-5-260628`
     - As shown in the figure below

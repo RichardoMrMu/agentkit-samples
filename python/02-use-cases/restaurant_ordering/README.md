@@ -74,7 +74,7 @@ async def summarize_order(tool_context: ToolContext = None) -> str:
 ```python
 order_agent = Agent(
     name="restaurant_ordering_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", "doubao-seed-evolving"),
     description="An agent that takes customer orders at a restaurant.",
     instruction=f"""
         You are a friendly and efficient order-taking assistant for a restaurant.
@@ -193,7 +193,7 @@ source .venv/bin/activate
 
 ```bash
 # 火山方舟模型名称
-export MODEL_AGENT_NAME=deepseek-v4-pro-260425
+export MODEL_AGENT_NAME=doubao-seed-evolving
 
 # 火山引擎访问凭证（必需）
 export VOLCENGINE_ACCESS_KEY=<Your Access Key>

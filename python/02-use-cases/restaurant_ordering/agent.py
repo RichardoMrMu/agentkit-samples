@@ -80,9 +80,21 @@ async def summarize_order(tool_context: ToolContext = None) -> str:
     return summary
 
 
+def _is_byteplus() -> bool:
+    provider = os.getenv("CLOUD_PROVIDER", "").strip().lower()
+    return provider == "byteplus" or (
+        not provider and bool(os.getenv("BYTEPLUS_REGION"))
+    )
+
+
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910" if _is_byteplus() else "doubao-seed-evolving"
+)
+
+
 order_agent = Agent(
     name="restaurant_ordering_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", DEFAULT_MODEL_AGENT_NAME),
     description=("An agent that takes customer orders at a restaurant."),
     instruction=f"""
         You are a friendly and efficient order-taking assistant for a restaurant.

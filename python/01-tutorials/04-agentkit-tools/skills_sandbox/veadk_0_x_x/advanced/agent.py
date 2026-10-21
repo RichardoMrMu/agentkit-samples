@@ -13,7 +13,12 @@ skill_space_id = os.getenv("SKILL_SPACE_ID")
 skills_file_path = "/home/project/your_path"
 agent = Agent(
     name="skill_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv(
+        "MODEL_AGENT_NAME",
+        "deepseek-v4-1-flash-260910"
+        if os.getenv("CLOUD_PROVIDER", "").strip().lower() == "byteplus"
+        else "doubao-seed-evolving",
+    ),
     instruction="根据用户的需求，使用 execute_skills 工具执行 skills，完成任务",
     # case1: skills 文件在 AgentKit skill space，运行使用AgentKit skills sandbox
     skills=[skill_space_id],

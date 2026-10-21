@@ -24,7 +24,17 @@ from veadk.tools.builtin_tools.video_generate import video_generate
 from veadk.tools.builtin_tools.web_search import web_search
 
 
-model = os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425")
+def _is_byteplus() -> bool:
+    provider = os.getenv("CLOUD_PROVIDER", "").strip().lower()
+    return provider == "byteplus" or (
+        not provider and bool(os.getenv("BYTEPLUS_REGION"))
+    )
+
+
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910" if _is_byteplus() else "doubao-seed-evolving"
+)
+model = os.getenv("MODEL_AGENT_NAME", DEFAULT_MODEL_AGENT_NAME)
 
 root_agent = Agent(
     name="image_video_tools_agent",

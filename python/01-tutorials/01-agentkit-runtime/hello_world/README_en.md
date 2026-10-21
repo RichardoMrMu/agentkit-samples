@@ -122,7 +122,7 @@ source .venv/bin/activate
 
 ```bash
 # BytePlus ModelArk model name
-export MODEL_AGENT_NAME=deepseek-v4-pro-260425
+export MODEL_AGENT_NAME=deepseek-v4-1-flash-260910
 
 # BytePlus Access Credentials (required)
 export BYTEPLUS_ACCESS_KEY=<Your Access Key>

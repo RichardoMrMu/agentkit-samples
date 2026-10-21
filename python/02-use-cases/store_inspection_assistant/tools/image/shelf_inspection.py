@@ -35,9 +35,7 @@ shelf_display_detection_tool_prompt = ""
 shelf_inspection_wearing_detection_tool_prompt = ""
 provider = os.getenv("CLOUD_PROVIDER", "").strip().lower()
 DEFAULT_MODEL_NAME = (
-    "dola-seed-2-1-turbo-260628"
-    if provider == "byteplus"
-    else "doubao-seed-2-0-pro-260215"
+    "dola-seed-2-1-turbo-260628" if provider == "byteplus" else "doubao-seed-evolving"
 )
 if provider == "byteplus":
     shelf_display_detection_tool_prompt = shelf_display_detection_tool_prompt_en

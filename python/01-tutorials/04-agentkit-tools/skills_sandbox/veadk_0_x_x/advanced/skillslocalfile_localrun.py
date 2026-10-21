@@ -13,7 +13,12 @@ skills_file_path = (
 )
 agent = Agent(
     name="skill_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv(
+        "MODEL_AGENT_NAME",
+        "deepseek-v4-1-flash-260910"
+        if os.getenv("CLOUD_PROVIDER", "").strip().lower() == "byteplus"
+        else "doubao-seed-evolving",
+    ),
     instruction="根据用户的需求，执行 skills，完成任务",
     skills=[skills_file_path],
     skills_mode="local",

@@ -27,7 +27,12 @@ new_session_id = "new_session"  # 新会话ID（无短期记忆）
 # 短期记忆：仅同session有效
 agent1 = Agent(
     name="test_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv(
+        "MODEL_AGENT_NAME",
+        "deepseek-v4-1-flash-260910"
+        if os.getenv("CLOUD_PROVIDER", "").strip().lower() == "byteplus"
+        else "doubao-seed-evolving",
+    ),
     instruction="You are a helpful assistant.",
 )
 
@@ -75,7 +80,12 @@ async def main():
     # 长期记忆：跨session有效
     agent2 = Agent(
         name="test_agent",
-        model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+        model_name=os.getenv(
+            "MODEL_AGENT_NAME",
+            "deepseek-v4-1-flash-260910"
+            if os.getenv("CLOUD_PROVIDER", "").strip().lower() == "byteplus"
+            else "doubao-seed-evolving",
+        ),
         instruction="Use LoadMemory tool to search previous info.",
         long_term_memory=long_term_memory,
     )

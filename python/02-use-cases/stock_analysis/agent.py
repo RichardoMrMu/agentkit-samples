@@ -23,7 +23,18 @@ from agentkit.apps import AgentkitAgentServerApp
 
 short_term_memory = ShortTermMemory(backend="local")
 MODEL_AGENT_NAME = "MODEL_AGENT_NAME"
-DEFAULT_MODEL_AGENT_NAME = "deepseek-v4-pro-260425"
+
+
+def _is_byteplus() -> bool:
+    provider = os.getenv("CLOUD_PROVIDER", "").strip().lower()
+    return provider == "byteplus" or (
+        not provider and bool(os.getenv("BYTEPLUS_REGION"))
+    )
+
+
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910" if _is_byteplus() else "doubao-seed-evolving"
+)
 model_name = os.getenv(MODEL_AGENT_NAME, DEFAULT_MODEL_AGENT_NAME)
 AKSHARE_VERSION = "1.18.88"
 AKSHARE_INDEX_URL = "https://mirrors.ivolces.com/pypi/simple/"

@@ -41,7 +41,7 @@ Main Agent (image_video_tools_agent)
 ```python
 root_agent = Agent(
     name="image_video_tools_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-1-flash-260910"),
     description="Call tools to generate images or videos",
     instruction="""
     You are an image and video generation assistant with image generation and video generation capabilities. There are three available tools:
@@ -173,8 +173,8 @@ Current dependency versions:
 ### Environment Preparation
 
 ```bash
-# BytePlus ModelArk model name; defaults to deepseek-v4-pro-260425 when unset
-export MODEL_AGENT_NAME=deepseek-v4-pro-260425
+# BytePlus ModelArk model name; defaults to deepseek-v4-1-flash-260910 when unset
+export MODEL_AGENT_NAME=deepseek-v4-1-flash-260910
 
 # BytePlus access credentials (required)
 export BYTEPLUS_ACCESS_KEY=<Your Access Key>

@@ -12,7 +12,12 @@ session_id = "agent_skills_skillspaceid_skillssandbox_session"
 skill_space_id = os.getenv("SKILL_SPACE_ID")
 agent = Agent(
     name="skill_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv(
+        "MODEL_AGENT_NAME",
+        "deepseek-v4-1-flash-260910"
+        if os.getenv("CLOUD_PROVIDER", "").strip().lower() == "byteplus"
+        else "doubao-seed-evolving",
+    ),
     instruction="根据用户的需求，使用 execute_skills 工具执行 skills， 完成任务",
     skills=[skill_space_id],
     tools=[execute_skills],

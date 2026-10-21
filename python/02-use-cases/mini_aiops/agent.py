@@ -41,7 +41,18 @@ ccapi_mcp_toolset = McpToolset(
     errlog=None,
 )
 
-model = os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425")
+
+def _is_byteplus() -> bool:
+    provider = os.getenv("CLOUD_PROVIDER", "").strip().lower()
+    return provider == "byteplus" or (
+        not provider and bool(os.getenv("BYTEPLUS_REGION"))
+    )
+
+
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910" if _is_byteplus() else "doubao-seed-evolving"
+)
+model = os.getenv("MODEL_AGENT_NAME", DEFAULT_MODEL_AGENT_NAME)
 
 agent: Agent = Agent(
     name="root_agent",

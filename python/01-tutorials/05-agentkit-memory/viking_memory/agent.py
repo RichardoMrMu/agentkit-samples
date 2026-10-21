@@ -42,9 +42,16 @@ provider = os.getenv("CLOUD_PROVIDER")
 if provider and provider.lower() == "byteplus":
     ROOT_AGENT_INSTRUCTION = ROOT_AGENT_INSTRUCTION_EN
 
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910"
+    if (provider and provider.lower() == "byteplus")
+    or (not provider and os.getenv("BYTEPLUS_REGION"))
+    else "doubao-seed-evolving"
+)
+
 root_agent = Agent(
     name="vikingmem_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", DEFAULT_MODEL_AGENT_NAME),
     instruction=ROOT_AGENT_INSTRUCTION,
     long_term_memory=long_term_memory,
     after_agent_callback=after_agent_execution,

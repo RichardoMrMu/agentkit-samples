@@ -41,7 +41,7 @@
 ```python
 root_agent = Agent(
     name="image_video_tools_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", "doubao-seed-evolving"),
     description="调用 tools 生成图片或者视频",
     instruction="""
     你是一个生图生视频助手，具备图像生成和视频生成能力。有三个可用的工具：
@@ -173,8 +173,8 @@ source .venv/bin/activate
 ### 环境准备
 
 ```bash
-# 火山方舟模型名称；不设置时默认使用 deepseek-v4-pro-260425
-export MODEL_AGENT_NAME=deepseek-v4-pro-260425
+# 火山方舟模型名称；不设置时默认使用 doubao-seed-evolving
+export MODEL_AGENT_NAME=doubao-seed-evolving
 
 # 火山引擎访问凭证（必需）
 export VOLCENGINE_ACCESS_KEY=<Your Access Key>

@@ -66,7 +66,7 @@ only `execute_skills`; it does not mount bash or code execution tools:
 ```python
 agent = Agent(
     name="remote_skills_runtime_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-1-flash-260910"),
     instruction=ROOT_AGENT_INSTRUCTION,
     skills=[os.getenv("SKILL_SPACE_ID")],
     skills_mode="skills_sandbox",
@@ -90,7 +90,7 @@ skill_toolset = SkillToolset(
 
 agent = Agent(
     name="skill_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-1-flash-260910"),
     instruction=ROOT_AGENT_INSTRUCTION,
     tools=[skill_toolset, invoke_skill, poll_skill] if skill_toolset else [],
 )

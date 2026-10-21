@@ -105,7 +105,7 @@ source .venv/bin/activate
 
 ```bash
 # BytePlus ModelArk model name. Override the default model in agent.py when needed.
-export MODEL_AGENT_NAME=deepseek-v4-pro-260425
+export MODEL_AGENT_NAME=deepseek-v4-1-flash-260910
 
 # BytePlus access credentials (required)
 export BYTEPLUS_ACCESS_KEY=<Your Access Key>

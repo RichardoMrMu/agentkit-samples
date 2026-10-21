@@ -33,6 +33,12 @@ ROOT_AGENT_INSTRUCTION = (
     if provider and provider.lower() == "byteplus"
     else ROOT_AGENT_INSTRUCTION_CN
 )
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910"
+    if (provider and provider.lower() == "byteplus")
+    or (not provider and os.getenv("BYTEPLUS_REGION"))
+    else "doubao-seed-evolving"
+)
 
 # prepare multiple knowledge sources
 with open("/tmp/product_info.txt", "w") as f:
@@ -90,7 +96,7 @@ kb.add_from_files(
 # create agent
 root_agent = Agent(
     name="vikingdb_agent",
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", DEFAULT_MODEL_AGENT_NAME),
     knowledgebase=kb,
     instruction=ROOT_AGENT_INSTRUCTION,
 )

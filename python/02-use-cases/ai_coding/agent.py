@@ -49,6 +49,14 @@ if provider and provider.lower() == "byteplus":
 else:
     with open("%s/prompt.zh.md" % current_dir, "r", encoding="utf-8") as f:
         instruction = f.read()
+
+DEFAULT_MODEL_AGENT_NAME = (
+    "deepseek-v4-1-flash-260910"
+    if (provider and provider.lower() == "byteplus")
+    or (not provider and os.getenv("BYTEPLUS_REGION"))
+    else "doubao-seed-evolving"
+)
+
 root_agent = Agent(
     name="ai_coding_agent",
     description="An AI coding agent that helps users solve programming problems",
@@ -66,7 +74,7 @@ root_agent = Agent(
             thinking_budget=1024,
         )
     ),
-    model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
+    model_name=os.getenv("MODEL_AGENT_NAME", DEFAULT_MODEL_AGENT_NAME),
 )
 
 app_name = "ai_coding_agent"
