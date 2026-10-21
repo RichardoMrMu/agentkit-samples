@@ -82,18 +82,7 @@ cp .env.example .env
 
 ## 访问密钥配置
 
-### 方式 1：命令行参数
-
-```bash
-python scripts/create_vedbm_instance.py \
-  --vpc-id <你的VPC ID> \
-  --subnet-id <你的子网 ID> \
-  --zone-id cn-guangzhou-a \
-  --access-key-id <你的AccessKeyId> \
-  --secret-access-key <你的SecretAccessKey>
-```
-
-### 方式 2：环境变量
+### 方式 1（推荐）：环境变量
 
 ```bash
 export VOLCENGINE_ACCESS_KEY="your-access-key-id"
@@ -105,9 +94,18 @@ export VEDBM_ZONE_ID="cn-guangzhou-a"
 python scripts/create_vedbm_instance.py
 ```
 
-### 方式 3：混合使用
+### 方式 2（推荐）：`.env` 文件
 
-可以部分用环境变量，部分用命令行参数：
+```bash
+cd scripts
+cp .env.example .env
+# 编辑 .env 文件填入真实信息（.env 已被 .gitignore 忽略，不会提交）
+python create_vedbm_instance.py
+```
+
+### 方式 3：命令行传入非敏感参数
+
+VPC ID、子网 ID、可用区等**非敏感**参数可通过命令行传入；AK/SK 仍从环境变量读取，不要出现在命令行中：
 
 ```bash
 export VOLCENGINE_ACCESS_KEY="your-access-key-id"
@@ -311,8 +309,8 @@ python scripts/list_instances.py
 脚本支持以下参数：
 
 - `--region`: 区域，默认 `cn-guangzhou`
-- `--access-key-id`: 访问密钥 ID（或环境变量 VOLCENGINE_ACCESS_KEY）
-- `--secret-access-key`: 秘密访问密钥（或环境变量 VOLCENGINE_SECRET_KEY）
+- 访问密钥：通过环境变量 `VOLCENGINE_ACCESS_KEY` 提供（出于安全考虑，不支持命令行参数）
+- 秘密访问密钥：通过环境变量 `VOLCENGINE_SECRET_KEY` 提供（出于安全考虑，不支持命令行参数）
 
 ## 输出信息
 
@@ -412,8 +410,8 @@ python scripts/list_db_accounts.py --instance-id <实例ID>
 
 - `--region`: 区域，默认 `cn-guangzhou`
 - `--instance-id`: 实例 ID（必须提供）
-- `--access-key-id`: 访问密钥 ID（或环境变量 VOLCENGINE_ACCESS_KEY）
-- `--secret-access-key`: 秘密访问密钥（或环境变量 VOLCENGINE_SECRET_KEY）
+- 访问密钥：通过环境变量 `VOLCENGINE_ACCESS_KEY` 提供（出于安全考虑，不支持命令行参数）
+- 秘密访问密钥：通过环境变量 `VOLCENGINE_SECRET_KEY` 提供（出于安全考虑，不支持命令行参数）
 
 ## 输出信息
 
@@ -505,8 +503,8 @@ python scripts/get_instance_endpoint.py --instance-id <实例ID>
 
 - `--region`: 区域，默认 `cn-guangzhou`
 - `--instance-id`: 实例 ID（必须提供）
-- `--access-key-id`: 访问密钥 ID（或环境变量 VOLCENGINE_ACCESS_KEY）
-- `--secret-access-key`: 秘密访问密钥（或环境变量 VOLCENGINE_SECRET_KEY）
+- 访问密钥：通过环境变量 `VOLCENGINE_ACCESS_KEY` 提供（出于安全考虑，不支持命令行参数）
+- 秘密访问密钥：通过环境变量 `VOLCENGINE_SECRET_KEY` 提供（出于安全考虑，不支持命令行参数）
 
 ## 输出信息
 
@@ -619,8 +617,8 @@ python scripts/describe_instance.py --instance-id <实例ID>
 
 - `--region`: 区域，默认 `cn-guangzhou`
 - `--instance-id`: 实例 ID（必须提供）
-- `--access-key-id`: 访问密钥 ID（或环境变量 VOLCENGINE_ACCESS_KEY）
-- `--secret-access-key`: 秘密访问密钥（或环境变量 VOLCENGINE_SECRET_KEY）
+- 访问密钥：通过环境变量 `VOLCENGINE_ACCESS_KEY` 提供（出于安全考虑，不支持命令行参数）
+- 秘密访问密钥：通过环境变量 `VOLCENGINE_SECRET_KEY` 提供（出于安全考虑，不支持命令行参数）
 - `--full`: 显示完整属性列表（调试用）
 
 ## 输出信息
@@ -718,8 +716,8 @@ python scripts/describe_instance.py \
 ----------------------------------------------------------------------------------------------------
   区域:          cn-guangzhou
   可用区:        cn-guangzhou-a
-  VPC ID:        vpc-3f03n0s2v50qo72200s6jj8ni
-  子网 ID:       subnet-11wfhusxgt05c40yrhczqa9cl
+  VPC ID:        vpc-xxxxxxxxxxxxxxxxxxxxx
+  子网 ID:       subnet-xxxxxxxxxxxxxxxxxxxx
 
 🗄️  数据库信息：
 ----------------------------------------------------------------------------------------------------
@@ -816,8 +814,8 @@ python scripts/upgrade_instance_spec.py --instance-id <实例ID>
 - `--instance-id`: 实例 ID（必须提供）
 - `--target-spec`: 目标规格（可选，不提供则自动升级一个等级）
   - 支持格式：`2c8g`、`4c16g`、`vedb.mysql.x4.large`
-- `--access-key-id`: 访问密钥 ID（或环境变量 VOLCENGINE_ACCESS_KEY）
-- `--secret-access-key`: 秘密访问密钥（或环境变量 VOLCENGINE_SECRET_KEY）
+- 访问密钥：通过环境变量 `VOLCENGINE_ACCESS_KEY` 提供（出于安全考虑，不支持命令行参数）
+- 秘密访问密钥：通过环境变量 `VOLCENGINE_SECRET_KEY` 提供（出于安全考虑，不支持命令行参数）
 
 ## 输出信息
 
@@ -980,8 +978,8 @@ python scripts/downgrade_instance_spec.py --instance-id <实例ID>
 - `--instance-id`: 实例 ID（必须提供）
 - `--target-spec`: 目标规格（可选，不提供则自动降级一个等级）
   - 支持格式：`2c8g`、`4c16g`、`vedb.mysql.x4.large`
-- `--access-key-id`: 访问密钥 ID（或环境变量 VOLCENGINE_ACCESS_KEY）
-- `--secret-access-key`: 秘密访问密钥（或环境变量 VOLCENGINE_SECRET_KEY）
+- 访问密钥：通过环境变量 `VOLCENGINE_ACCESS_KEY` 提供（出于安全考虑，不支持命令行参数）
+- 秘密访问密钥：通过环境变量 `VOLCENGINE_SECRET_KEY` 提供（出于安全考虑，不支持命令行参数）
 
 ## 输出信息
 

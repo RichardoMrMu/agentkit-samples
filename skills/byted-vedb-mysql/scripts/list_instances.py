@@ -172,49 +172,41 @@ def main():
         default=os.getenv("VEDBM_REGION", "cn-guangzhou"),
         help="区域（默认：cn-guangzhou，或环境变量 VEDBM_REGION）",
     )
-    parser.add_argument(
-        "--access-key-id",
-        default=os.getenv("VOLCENGINE_ACCESS_KEY"),
-        help="访问密钥 ID（或环境变量 VOLCENGINE_ACCESS_KEY）",
-    )
-    parser.add_argument(
-        "--secret-access-key",
-        default=os.getenv("VOLCENGINE_SECRET_KEY"),
-        help="秘密访问密钥（或环境变量 VOLCENGINE_SECRET_KEY）",
-    )
 
     args = parser.parse_args()
 
+    # 安全提示：AccessKey/SecretKey 仅从环境变量 / .env 读取，不接受命令行参数，
+    # 避免凭据暴露在系统进程列表（ps / /proc/<pid>/cmdline）和 Shell 历史记录中。
+    access_key_id = os.getenv("VOLCENGINE_ACCESS_KEY")
+    secret_access_key = os.getenv("VOLCENGINE_SECRET_KEY")
+
     # 检查必填参数
     missing = []
-    if not args.access_key_id:
-        missing.append("AccessKey ID（--access-key-id 或 VOLCENGINE_ACCESS_KEY）")
-    if not args.secret_access_key:
-        missing.append(
-            "Secret Access Key（--secret-access-key 或 VOLCENGINE_SECRET_KEY）"
-        )
+    if not access_key_id:
+        missing.append("AccessKey ID（环境变量 VOLCENGINE_ACCESS_KEY）")
+    if not secret_access_key:
+        missing.append("Secret Access Key（环境变量 VOLCENGINE_SECRET_KEY）")
 
     if missing:
         print("❌ 缺少必要参数！")
         print("\n请提供以下信息：")
         for item in missing:
             print(f"  - {item}")
-        print("\n方式 1：命令行参数")
-        print("  python list_instances.py --access-key-id xxx --secret-access-key xxx")
-        print("\n方式 2：环境变量")
+        print("\n⚠️  为避免凭据泄露，AK/SK 仅支持通过环境变量或 .env 文件提供，")
+        print("    不要作为命令行参数传入（会暴露在进程列表和 Shell 历史中）。")
+        print("\n方式 1：环境变量")
         print("  export VOLCENGINE_ACCESS_KEY=xxx")
         print("  export VOLCENGINE_SECRET_KEY=xxx")
         print("  python list_instances.py")
-        print("\n方式 3：混合使用")
-        print("  export VOLCENGINE_ACCESS_KEY=xxx")
-        print("  export VOLCENGINE_SECRET_KEY=xxx")
+        print("\n方式 2：.env 文件（cp .env.example .env 后填入真实信息）")
+        print("\n方式 3：非敏感参数用命令行，AK/SK 仍用环境变量")
         print("  python list_instances.py --region cn-beijing")
         sys.exit(1)
 
     result = list_instances(
         region=args.region,
-        access_key_id=args.access_key_id,
-        secret_access_key=args.secret_access_key,
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
     )
 
     print_result(result)

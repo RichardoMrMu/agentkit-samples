@@ -270,46 +270,42 @@ def main():
     )
     parser.add_argument("--instance-id", required=True, help="实例 ID（必填）")
     parser.add_argument(
-        "--access-key-id",
-        default=os.getenv("VOLCENGINE_ACCESS_KEY"),
-        help="访问密钥 ID（或环境变量 VOLCENGINE_ACCESS_KEY）",
-    )
-    parser.add_argument(
-        "--secret-access-key",
-        default=os.getenv("VOLCENGINE_SECRET_KEY"),
-        help="秘密访问密钥（或环境变量 VOLCENGINE_SECRET_KEY）",
-    )
-    parser.add_argument(
         "--full", action="store_true", help="显示完整属性列表（调试用）"
     )
 
     args = parser.parse_args()
 
+    # 安全提示：AccessKey/SecretKey 仅从环境变量 / .env 读取，不接受命令行参数，
+    # 避免凭据暴露在系统进程列表（ps / /proc/<pid>/cmdline）和 Shell 历史记录中。
+    access_key_id = os.getenv("VOLCENGINE_ACCESS_KEY")
+    secret_access_key = os.getenv("VOLCENGINE_SECRET_KEY")
+
     # 检查必填参数
     missing = []
     if not args.instance_id:
         missing.append("实例 ID（--instance-id）")
-    if not args.access_key_id:
-        missing.append("AccessKey ID（--access-key-id 或 VOLCENGINE_ACCESS_KEY）")
-    if not args.secret_access_key:
-        missing.append(
-            "Secret Access Key（--secret-access-key 或 VOLCENGINE_SECRET_KEY）"
-        )
+    if not access_key_id:
+        missing.append("AccessKey ID（环境变量 VOLCENGINE_ACCESS_KEY）")
+    if not secret_access_key:
+        missing.append("Secret Access Key（环境变量 VOLCENGINE_SECRET_KEY）")
 
     if missing:
         print("❌ 缺少必要参数！")
         print("\n请提供以下信息：")
         for item in missing:
             print(f"  - {item}")
+        print("\n⚠️  AK/SK 仅支持通过环境变量或 .env 文件提供（不要用命令行参数，会泄露）。")
         print("\n使用示例：")
+        print("  export VOLCENGINE_ACCESS_KEY=xxx")
+        print("  export VOLCENGINE_SECRET_KEY=xxx")
         print("  python describe_instance.py --instance-id vedbm-xxx123456")
         sys.exit(1)
 
     result = describe_instance(
         region=args.region,
         instance_id=args.instance_id,
-        access_key_id=args.access_key_id,
-        secret_access_key=args.secret_access_key,
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
         show_full=args.full,
     )
 
