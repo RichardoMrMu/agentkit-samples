@@ -1,0 +1,31 @@
+version: 1
+
+# 本文件仅含占位值；复制为 config.yaml 后填写。
+
+mcp:
+  mode: "" # 必填。keyauth or oauth
+  keyauth:
+    url: "" # 必填。或 MCP_URL；填写完整 Streamable HTTP URL（包含网关提供的路径）
+    api_key: "" # 或 MCP_API_KEY；填原始 API Key，不含 Bearer 前缀
+  oauth:
+    volcengine_access_key: "" # 必填。
+    volcengine_secret_key: "" # 必填。
+    # 地域使用 VOLCENGINE_REGION，默认 cn-beijing。
+    url: "" # 必填。或 MCP_URL；填写完整 Streamable HTTP URL（包含网关提供的路径）
+    user_pool_uid: "" # 必填。MCP Gateway 入站鉴权关联的 UserPool
+    client_uid: "" # 可选。留空时自动选择用户池中唯一的 M2M Client；有多个时需指定
+    host: open.volcengineapi.com
+    api_version: "2025-10-30"
+
+state_file: .sandbox_mcp_state.json # 相对路径以 config.yaml 所在目录为基准
+http_timeout_seconds: 60
+wait_timeout_seconds: 600
+poll_interval_seconds: 5
+
+# 默认使用下列工具名；如网关加了前缀，映射到 tools/list 返回的完整名称。
+tools:
+  createSession: createSession
+  listSessions: listSessions
+  getSession: getSession
+  invokeTool: invokeTool
+  deleteSession: deleteSession
