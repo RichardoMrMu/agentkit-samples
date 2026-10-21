@@ -1,7 +1,7 @@
 # 鉴权准备
 
-业务命令返回鉴权错误或登录指引时读取。客户在浏览器完成授权，Agent 执行登录并读取结果。
-需要诊断时运行：
+鉴权、登录或 CLI 定位异常时读取。客户在浏览器完成授权，Agent 执行登录并读取结果。
+脚本复用当前 `PATH` 或用户登录 shell 中的 `ve`；需要诊断时运行：
 
 ```bash
 python3 -E -B <skill目录>/scripts/sms_cli.py auth-doctor
@@ -9,6 +9,7 @@ python3 -E -B <skill目录>/scripts/sms_cli.py auth-doctor
 
 按 `error.remediation` 的 `argv`、`env`、`target`、`continue_with_env` 和 `cleanup` 执行：
 
+- `inspect_ve_executable`：核对执行位置、安装位置与执行权限；确认当前环境未安装时执行 `if_missing`。
 - `install_ve`：从返回的官方来源安装到用户可写路径；Release 文件用同一版本的校验文件核验 SHA-256。
 - `run_login`：执行顶层 `argv`，保存平台受管的 job/session；脚本按 CLI 能力选择登录流程。
   本地回调流程由 CLI 打开网页并接收授权结果。回调不可用时，结束旧登录，沿用其环境与

@@ -10,5 +10,35 @@
     ".volces.com"
   ],
   "imagex_endpoint": "https://imagex.bytedanceapi.com",
-  "imagex_service_id": "2rcdq6eupd"
+  "imagex_service_id": "2rcdq6eupd",
+  "sms_onboarding": {
+    "protocols": [
+      {
+        "document_id": 68938,
+        "title": "产品和服务协议",
+        "url": "https://www.volcengine.com/docs/6256/68938"
+      },
+      {
+        "document_id": 67343,
+        "title": "短信服务专用条款",
+        "url": "https://www.volcengine.com/docs/6361/67343"
+      },
+      {
+        "document_id": 67416,
+        "title": "短信信息管理规范",
+        "url": "https://www.volcengine.com/docs/6361/67416"
+      },
+      {
+        "document_id": 66708,
+        "title": "短信服务等级协议（国内短信）",
+        "url": "https://www.volcengine.com/docs/6361/66708"
+      }
+    ],
+    "pricing_url": "https://www.volcengine.com/docs/6361/67320",
+    "billing_summary": "国内文本短信按发送成功的条数计费，优先抵扣有效套餐额度，超出部分按量计费；具体价格和结算周期以账号合同及官方计费说明为准。",
+    "other_product_protocol_ids": [
+      136520,
+      1359409
+    ]
+  }
 }

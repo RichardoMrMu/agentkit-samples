@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import argparse
-import calendar
 import csv
 import datetime
 import hashlib
@@ -35,16 +34,22 @@ import uuid
 from typing import Any, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple
 from urllib import parse, request
 
+from request_context import RequestContext
+
 from action_contracts import PUBLIC_QUERY_ACTIONS
 import batch_confirmation
+from batch_confirmation import canonical_digest
 import runtime_environment
+import service_onboarding
 from api_client import (
     LOGIN_PROCESS_LEASE_SECONDS,
+    PublicDigest,
     SmsApiClient,
     cleanup_private_auth_home,
     emit_json,
     prepare_cli_process_environment,
     select_cli_auth_home,
+    sanitize_output,
     ve_login_flow,
 )
 from qualification_display import qualification_display_adapter
@@ -149,24 +154,19 @@ def _local_error(action: str, exc: CliError) -> Dict[str, Any]:
 
 
 def _local_success(action: str, result: Mapping[str, Any]) -> Dict[str, Any]:
+    # 本机生成结果拥有确认摘要字段；原生 API 与用户正文中的同名字段仍按原有隐私规则处理。
+    public_result = dict(result)
+    if "digest" in public_result:
+        public_result["digest"] = PublicDigest(public_result["digest"])
     return {
         "success": True,
         "action": action,
         "request_id": result.get("requestId"),
         "log_id": result.get("logId"),
-        "result": dict(result),
+        "result": public_result,
         "error": None,
     }
 
-
-def canonical_digest(payload: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _normalize_signature(value: str) -> str:
@@ -505,6 +505,32 @@ def _render_content(content: str, variables: Mapping[str, Any]) -> str:
     return _VARIABLE_RE.sub(lambda match: str(variables[match.group(1)]), content)
 
 
+def _traffic_contents(content: str, snapshot: Optional[bytes] = None):
+    variable_names = _VARIABLE_RE.findall(content)
+    if content.count("${") != len(variable_names):
+        raise CliError("正文含无法识别的变量，请使用 ${url} 这样的变量并匹配 CSV 列名", "invalid_batch_content")
+    if snapshot is None:
+        if variable_names:
+            raise CliError("正文还有待填写变量，请提供 CSV 或填完变量后的实际正文", "invalid_batch_content")
+        yield 1, content
+        return
+    try:
+        reader = csv.DictReader(io.StringIO(snapshot.decode("utf-8-sig")))
+        variables = set(variable_names)
+        if (not reader.fieldnames or len(reader.fieldnames) != len(set(reader.fieldnames))
+                or not variables.issubset(reader.fieldnames)):
+            raise CliError("CSV 表头为空、列名重复或缺少正文需要的变量列", "invalid_batch_file")
+        for index, row in enumerate(reader, 2):
+            if None in row or any(value is None for value in row.values()):
+                raise CliError("CSV 第 {} 条记录的列不完整".format(index), "invalid_batch_file")
+            rendered = _render_content(content, row)
+            if "${" in rendered:
+                raise CliError("CSV 第 {} 条记录渲染后仍含待填写变量".format(index), "invalid_batch_content")
+            yield index, rendered
+    except (UnicodeDecodeError, csv.Error) as exc:
+        raise CliError("CSV 必须使用 UTF-8 且格式正确", "invalid_batch_file") from exc
+
+
 def _segments(content: str, signature: str) -> int:
     length = len("【{}】{}".format(signature, content))
     return 1 if length <= 70 else int(math.ceil(length / 67.0))
@@ -687,6 +713,7 @@ def precheck_batch_csv(
         raise CliError(
             "batch CSV columns must exactly be: {}".format(",".join(expected))
         )
+    # 只统计重复，原始文件仍交给服务端去重并返回实际有效数量。
     seen = set()
     count = 0
     try:
@@ -696,8 +723,6 @@ def precheck_batch_csv(
             if not any(str(value).strip() for value in row.values()):
                 raise CliError("batch CSV contains a blank row")
             mobile = _normalize_mobile(str(row["phone"]))
-            if mobile in seen:
-                raise CliError("batch CSV contains duplicate mobile numbers")
             seen.add(mobile)
             if any(not str(row[name]).strip() for name in template_variables):
                 raise CliError("batch CSV contains an empty template variable")
@@ -717,17 +742,10 @@ def precheck_batch_csv(
         "fileSize": file_size,
         "columns": expected,
         "totalCount": count,
-        "validCount": count,
+        "validCount": len(seen),
         "invalidCount": 0,
-        "dupCount": 0,
+        "dupCount": count - len(seen),
     }
-
-
-def _next_month(value: datetime.datetime) -> datetime.datetime:
-    year = value.year + (1 if value.month == 12 else 0)
-    month = 1 if value.month == 12 else value.month + 1
-    day = min(value.day, calendar.monthrange(year, month)[1])
-    return value.replace(year=year, month=month, day=day)
 
 
 def validate_batch_schedule(
@@ -737,8 +755,6 @@ def validate_batch_schedule(
 ) -> int:
     current = now.astimezone(CHINA_TZ)
     if not scheduled:
-        if not datetime.time(8, 0) <= current.time() <= datetime.time(21, 30):
-            raise CliError("immediate batch send is outside 08:00-21:30 Asia/Shanghai")
         return 0
     if not send_time:
         raise CliError("scheduled batch task requires send-time")
@@ -751,10 +767,9 @@ def validate_batch_schedule(
     parsed = parsed.astimezone(CHINA_TZ)
     if parsed <= current:
         raise CliError("scheduled send-time must be in the future")
-    if parsed > _next_month(current):
-        raise CliError("scheduled send-time must be no more than one month ahead")
-    if not datetime.time(8, 0) <= parsed.time() <= datetime.time(21, 30):
-        raise CliError("scheduled send-time must be within 08:00-21:30 Asia/Shanghai")
+    if parsed > current + datetime.timedelta(days=30):
+        raise CliError("scheduled send-time must be no more than 30 days ahead")
+    # 控制台限定未来 30 天；日内发送时段和账号例外由服务端统一判定。
     return int(parsed.timestamp())
 
 
@@ -1239,6 +1254,32 @@ def execute(
             return _batch_launch(args, client, now=now)
         except batch_confirmation.BatchConfirmationError as exc:
             raise CliError(str(exc), exc.code, outcome_unknown=exc.outcome_unknown) from exc
+    if args.command in {"service-status", "service-preview", "service-submit", "service-wizard"}:
+        try:
+            if args.command == "service-wizard":
+                from service_wizard import run_service_wizard
+                result = run_service_wizard(
+                    client, display=qualification_display_adapter(args.display),
+                    on_display_ready=_report_form_ready,
+                )
+                if result.get("outcomeUnknown") is True:
+                    raise CliError(
+                        "开通或协议签署结果待核实，请查询服务状态",
+                        "submission_outcome_unknown", outcome_unknown=True,
+                        request_id=result.get("requestId"),
+                    )
+            elif args.command == "service-submit":
+                result = service_onboarding.submit(client, args.preview_digest, args.authorization_digest)
+            elif args.command == "service-preview":
+                result = service_onboarding.preview(client)
+            else:
+                result = service_onboarding.status(client)
+            return _local_success(args.command, result)
+        except service_onboarding.ServiceOnboardingError as exc:
+            if exc.response is not None:
+                return exc.response
+            raise CliError(str(exc), exc.code, outcome_unknown=exc.outcome_unknown,
+                           request_id=exc.request_id, remediation=exc.remediation) from exc
     if args.command == "account-info":
         return client.call("ListAllSmsProduct", {})
     if args.command == "runtime-info":
@@ -1291,7 +1332,9 @@ def execute(
             _run_login_process(login_argv, login_env)
             return client.auth_doctor()
         except FileNotFoundError as exc:
-            raise CliError("Volcengine CLI is not installed", "ve_cli_missing") from exc
+            raise CliError(
+                "Volcengine CLI was not found in the current process PATH", "ve_cli_missing",
+            ) from exc
         except (OSError, RuntimeError) as exc:
             raise CliError(
                 "Unable to start Volcengine login in the system temporary directory",
@@ -1338,9 +1381,51 @@ def execute(
             )
         return _local_success(args.command, result)
 
+    if args.command == "traffic-wizard":
+        from traffic_driving import TrafficDrivingDraft, TrafficDrivingError
+        from traffic_wizard import run_traffic_wizard
+        try:
+            draft = TrafficDrivingDraft(client, args.kind, args.params)
+        except TrafficDrivingError as exc:
+            if exc.response is not None:
+                _require_query_success(exc.response)
+            raise CliError(str(exc), "traffic_identity_invalid") from exc
+        except ValueError as exc:
+            raise CliError(str(exc), "argument_error") from exc
+        result = run_traffic_wizard(
+            draft, display=qualification_display_adapter(args.display),
+            on_display_ready=_report_form_ready,
+        )
+        return _local_success(args.command, result)
+
+    if args.command == "signature-wizard":
+        from signature_application import SignatureDraft, SignatureApplicationError
+        from signature_wizard import run_signature_wizard
+        try:
+            result = run_signature_wizard(
+                SignatureDraft(client, args.params or {}),
+                display=qualification_display_adapter(args.display), on_display_ready=_report_form_ready,
+            )
+        except SignatureApplicationError as exc:
+            raise CliError(str(exc), exc.code, request_id=exc.request_id,
+                           log_id=exc.log_id, remediation=exc.remediation, outcome_unknown=exc.outcome_unknown) from exc
+        if result.get("outcomeUnknown") is True:
+            raise CliError("签名申请结果未知，请先查询，不要重复提交", "signature_submission_outcome_unknown",
+                           request_id=result.get("requestId"), outcome_unknown=True)
+        return _local_success(args.command, result)
+
     if args.command == "api-read":
         # Native parameters are HTTP data, never CLI flags or authentication options.
         return client.call(args.action, args.params, use_cli=False)
+
+    if args.command == "traffic-check":
+        from traffic_check import check_traffic_contents
+        snapshot = _read_batch_snapshot(pathlib.Path(args.file)) if args.file else None
+        report = check_traffic_contents(
+            client, _traffic_contents(args.content, snapshot), use_volc_link=args.use_volc_link,
+            max_contents=args.max_contents, report_params=args.report_params,
+        )
+        return _local_success(args.command, report)
 
     if args.command == "match-template":
         return _match_template(client, args)
@@ -1357,20 +1442,64 @@ def execute(
         action, params = _query_params(args)
         return client.call(action, params)
 
-    if args.command in {
-        "signature-preview", "signature-submit", "template-preview", "template-submit",
-    }:
-        body = args.params
-        digest = canonical_digest(body)
+    if args.command in {"signature-preview", "signature-submit"}:
+        from signature_application import (
+            SignatureApplicationError, prepare_signature, save_signature_preview,
+            signature_digest, signature_event, signature_scope, submit_confirmed_signature,
+        )
+        try:
+            scope = signature_scope(client)
+            body, material, warnings = prepare_signature(client, args.params, scope=scope)
+        except SignatureApplicationError as exc:
+            raise CliError(str(exc), exc.code, request_id=exc.request_id,
+                           log_id=exc.log_id, remediation=exc.remediation, outcome_unknown=exc.outcome_unknown) from exc
+        except ValueError as exc:
+            signature_event(client, "prepare", "path", result_class="rejected", error_code="argument_error")
+            raise CliError(str(exc), "argument_error") from exc
+        digest = signature_digest(body, scope, material)
+        if args.command == "signature-preview":
+            try:
+                save_signature_preview(digest, scope)
+            except SignatureApplicationError as exc:
+                raise CliError(str(exc), exc.code, outcome_unknown=exc.outcome_unknown) from exc
+            preview = sanitize_output(body, private_fields=frozenset({"filecontent", "fileurl"}),
+                                      preserve_business_values=True)
+            return _local_success(args.command, {
+                "preview": preview, "digest": digest, "action": "ApplySmsSignatureV2",
+                "businessCertificateName": material["businessCertificateName"], "warnings": warnings,
+            })
+        if not hmac.compare_digest(args.preview_digest, digest):
+            raise CliError("参数、账号或所选资质已变化，请重新预览确认", "digest_mismatch")
+        if warnings and not args.accept_risk:
+            raise CliError("名称存在审核风险，请先修改或取得客户明确的风险确认",
+                           "signature_risk_confirmation_required")
+        try:
+            return submit_confirmed_signature(client, body, scope, digest)
+        except SignatureApplicationError as exc:
+            raise CliError(str(exc), exc.code, request_id=exc.request_id,
+                           log_id=exc.log_id, outcome_unknown=exc.outcome_unknown) from exc
+
+    if args.command in {"template-preview", "template-submit"}:
+        from template_application import TemplateApplicationError, prepare_template_application, template_call
+        from traffic_driving import TrafficDrivingError
+        action = "ApplySmsTemplateV2ForAgent"
+        try:
+            body, scope, warnings = prepare_template_application(client, args.params)
+        except (TemplateApplicationError, TrafficDrivingError) as exc:
+            if exc.response is not None:
+                _require_query_success(exc.response)
+            raise CliError(str(exc), getattr(exc, "code", "traffic_template_invalid")) from exc
+        digest = canonical_digest({"action": action, "credentialScope": scope, "params": body})
         if args.command.endswith("-preview"):
-            return _local_success(args.command, {"preview": body, "digest": digest})
+            return _local_success(args.command, {
+                "preview": body, "digest": digest, "action": action, "warnings": warnings,
+            })
         if not hmac.compare_digest(args.preview_digest, digest):
             raise CliError(
                 "input changed after preview; generate a new preview",
                 "digest_mismatch",
             )
-        action = "ApplySmsSignatureV2" if args.command == "signature-submit" else "ApplySmsTemplateV2"
-        return client.call(action, body, use_cli=False)
+        return template_call(client, action, body, scope=scope)
 
     if args.command == "send-status":
         params = {"MessageId": args.message_id, "Page": args.page, "PageSize": args.page_size}
@@ -1461,6 +1590,7 @@ class BatchFormDraft:
         self._report: Optional[Dict[str, Any]] = None
         self._preview: Optional[Dict[str, Any]] = None
         self._file_key: Optional[str] = None
+        self._traffic_report: Optional[Dict[str, Any]] = None
         self._validation_task_id: Optional[str] = None
         self._scope: Optional[str] = None
         self._resource_digest: Optional[str] = None
@@ -1507,6 +1637,7 @@ class BatchFormDraft:
     def clear_file(self) -> None:
         self._editable()
         self._snapshot = self._report = self._preview = None
+        self._traffic_report = None
         self._file_key = None
         self.revision += 1
 
@@ -1791,6 +1922,18 @@ class BatchFormDraft:
             raise CliError("请先在页面选择 CSV 文件", "batch_file_required")
         current = (self.now or (lambda: datetime.datetime.now(CHINA_TZ)))()
         send_timestamp = validate_batch_schedule(scheduled, send_time, current)
+        if self.args.check_traffic and self._traffic_report is None:
+            from traffic_check import check_traffic_contents
+            detail = _template_for_preview(self.client, "ListSecondTemplate", self.args.template_id,
+                                           self.args.signature, self.args.sub_account)
+            records = detail["TemplateRecords"]
+            short_link_modes = [record.get("useVolcLink") for record in records]
+            if any(type(mode) is not bool for mode in short_link_modes) or len(set(short_link_modes)) != 1:
+                raise CliError("模板短链配置不一致，请先核对模板详情", "ambiguous_template_preview")
+            self._traffic_report = check_traffic_contents(
+                self.client, _traffic_contents(self.metadata["content"], self._snapshot),
+                use_volc_link=short_link_modes[0], credential_scope=self._scope,
+            )
         self.args.scheduled, self.args.send_time = scheduled, send_time
         self._submitting = True
         try:
@@ -1814,6 +1957,7 @@ class BatchFormDraft:
         self._preview = {
             **self.metadata,
             **validation,
+            **({"trafficCheck": self._traffic_report} if self._traffic_report is not None else {}),
             "fileSize": self._report["fileSize"],
             "fileSha256": self._report["fileSha256"],
             "scheduled": scheduled,
@@ -1957,6 +2101,7 @@ class BatchFormDraft:
         if self._validation_task_id is not None:
             return {
                 "status": "batch_file_validated",
+                **({"trafficCheck": self._traffic_report} if self._traffic_report is not None else {}),
                 "taskId": self._validation_task_id,
                 "subAccount": self.args.sub_account,
                 "fallbackAllowed": False,
@@ -2033,7 +2178,14 @@ def build_parser() -> JsonArgumentParser:
 
     commands.add_parser("runtime-info", help="show the installed package environment")
     commands.add_parser("auth-doctor", help="check ve and credential readiness")
-    commands.add_parser("account-info", help="read account information for sending preparation")
+    commands.add_parser("account-info", help="query account identity and SMS product states")
+    commands.add_parser("service-status", help="核实国内短信服务与协议状态")
+    service_wizard = commands.add_parser("service-wizard", help="默认入口：打开短信开通或协议更新表单")
+    service_wizard.add_argument("--display", choices=("host", "browser"), default="browser")
+    commands.add_parser("service-preview", help="会话回退：预览短信开通或协议更新信息")
+    service_submit = commands.add_parser("service-submit", help="会话回退：提交已确认的短信开通或协议更新")
+    service_submit.add_argument("--preview-digest", required=True)
+    service_submit.add_argument("--authorization-digest", required=True)
     auth_login = commands.add_parser(
         "auth-login", help="start login with a system-temporary CLI HOME"
     )
@@ -2069,13 +2221,27 @@ def build_parser() -> JsonArgumentParser:
 
     qualification = commands.add_parser(
         "qualification-wizard",
-        help="open one private local qualification draft and submission wizard",
+        help="默认入口：打开资质申请表单",
     )
     qualification.add_argument(
         "--display",
         choices=("browser", "host"),
         default="browser",
     )
+
+    traffic = commands.add_parser("traffic-wizard", help="默认入口：打开引流链接或号码录入表单")
+    traffic.add_argument("--kind", required=True, choices=("link", "phone"))
+    traffic.add_argument("--params", type=_json_object, help="预填接口原生 data；号码仅支持号码、类型、企业和归属地，个人材料在页面填写")
+    traffic.add_argument("--display", choices=("host", "browser"), default="browser")
+
+    traffic_check = commands.add_parser("traffic-check", help="只读检查实际正文或 CSV 中的引流资源，可选查询报备状态")
+    traffic_check.add_argument("--content", required=True, help="实际正文；传入 file 时按 CSV 变量逐行渲染")
+    traffic_check.add_argument("--file", help="本机 CSV 路径；收件人及完整正文不进入输出")
+    traffic_check.add_argument("--use-volc-link", action="store_true", help="按模板实际短链配置选择")
+    traffic_check.add_argument("--max-contents", type=_bounded_int("max-contents", 1, MAX_BATCH_ROWS), default=100,
+                               help="最多查询多少种不同正文，默认 100；未覆盖时 complete=false")
+    traffic_check.add_argument("--report-params", type=_json_object,
+                               help="报备查询的原生参数，不含 Content；正文由脚本填入")
 
     signatures = commands.add_parser("list-signatures", help="分页查询签名列表及其适用范围和审核状态")
     signatures.add_argument("--signature")
@@ -2109,11 +2275,23 @@ def build_parser() -> JsonArgumentParser:
     query.add_argument("--action", required=True, choices=sorted(PUBLIC_QUERY_ACTIONS))
     query.add_argument("--params", required=True, type=_json_object)
 
-    for name in ("signature-preview", "signature-submit", "template-preview", "template-submit"):
-        application = commands.add_parser(name)
+    for name, help_text in (
+        ("signature-preview", "会话回退：预览无附件签名申请"),
+        ("signature-submit", "会话回退：提交已确认的无附件签名申请"),
+        ("template-preview", "预览短信模板申请"),
+        ("template-submit", "提交已确认的短信模板申请"),
+    ):
+        application = commands.add_parser(name, help=help_text)
         application.add_argument("--params", required=True, type=_json_object)
         if name.endswith("-submit"):
             application.add_argument("--preview-digest", required=True)
+        if name == "signature-submit":
+            application.add_argument("--accept-risk", action="store_true",
+                                     help="仅在客户明确接受本次名称风险后传入；仍须通过后端校验和审核")
+
+    signature_wizard = commands.add_parser("signature-wizard", help="默认入口：打开签名申请表单并预填资料")
+    signature_wizard.add_argument("--params", type=_json_object)
+    signature_wizard.add_argument("--display", choices=("host", "browser"), default="browser")
 
     _send_options(commands.add_parser("send-preview"), submit=False)
     _send_options(commands.add_parser("send-submit"), submit=True)
@@ -2133,7 +2311,7 @@ def build_parser() -> JsonArgumentParser:
     demo.add_argument("--template-id", required=True)
 
     wizard = commands.add_parser(
-        "batch-wizard", help="打开群发表单，由客户在页面选择名单并确认发送",
+        "batch-wizard", help="默认入口：打开群发表单并确认发送",
         description="在会话中确认模板、正文、消息组和发送时间，再打开表单预填；客户选择 CSV 名单并最终确认发送。",
     )
     wizard.add_argument("--sub-account", required=True, help=MESSAGE_GROUP_ID_HELP)
@@ -2141,6 +2319,7 @@ def build_parser() -> JsonArgumentParser:
     wizard.add_argument("--signature", required=True)
     wizard.add_argument("--template-id", required=True)
     wizard.add_argument("--content")
+    wizard.add_argument("--check-traffic", action="store_true", help="将名单渲染后的正文提交接口检查引流资源，展示覆盖范围及待补资源")
     wizard_time = wizard.add_mutually_exclusive_group()
     wizard_time.add_argument("--scheduled", dest="scheduled", action="store_const", const=True, default=None,
                             help="预选会话中确认的定时发送")
@@ -2149,7 +2328,7 @@ def build_parser() -> JsonArgumentParser:
     wizard.add_argument("--send-time", help="会话确认的 ISO 8601 发送时间")
     wizard.add_argument("--display", choices=("host", "browser"), default="browser")
 
-    create = commands.add_parser("batch-create")
+    create = commands.add_parser("batch-create", help="文件回退：从本机 CSV 创建群发任务")
     create.add_argument("--file", required=True)
     create.add_argument("--sub-account", required=True, help=MESSAGE_GROUP_ID_HELP)
     create.add_argument("--task-name", required=True)
@@ -2169,10 +2348,10 @@ def build_parser() -> JsonArgumentParser:
     tasks.add_argument("--template-id")
     _page_options(tasks)
 
-    launch_preview = commands.add_parser("batch-launch-preview")
+    launch_preview = commands.add_parser("batch-launch-preview", help="文件回退／任务续接：预览已有任务启动")
     _batch_identity_options(launch_preview)
 
-    launch_submit = commands.add_parser("batch-launch-submit")
+    launch_submit = commands.add_parser("batch-launch-submit", help="文件回退／任务续接：确认启动已有任务")
     _batch_identity_options(launch_submit)
     launch_submit.add_argument("--preview-digest", required=True)
     launch_submit.add_argument("--authorization-text", required=True)
@@ -2192,6 +2371,7 @@ def main(
     argv: Optional[Sequence[str]] = None,
     *,
     client: Optional[SmsApiClient] = None,
+    request_context: Optional[RequestContext] = None,
     stdout: TextIO = sys.stdout,
     stderr: TextIO = sys.stderr,
     uploader: Any = _default_uploader,
@@ -2201,7 +2381,14 @@ def main(
     command = effective_argv[0] if effective_argv else "sms"
     try:
         args = build_parser().parse_args(effective_argv)
-        client = client or SmsApiClient(profile=getattr(args, "profile", None))
+        if client is None:
+            request_context = request_context or RequestContext.create("cli")
+            client = SmsApiClient(
+                profile=getattr(args, "profile", None), request_context=request_context,
+            )
+        else:
+            # 注入客户端时，以实际发请求的客户端上下文为权威，避免诊断编号与 header 不一致。
+            request_context = getattr(client, "request_context", None)
         result = execute(
             args,
             client,
@@ -2215,6 +2402,8 @@ def main(
             command,
             CliError("unexpected local error", "internal_error"),
         )
+    if request_context is not None:
+        result = {**result, **request_context.diagnostics()}
     output = emit_json(
         result, secrets=tuple(getattr(client, "output_secrets", ())),
         preserve_business_values=command == "match-template",

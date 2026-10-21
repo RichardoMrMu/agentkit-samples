@@ -59,6 +59,7 @@ from typing import (
 from urllib import error, parse, request
 
 import runtime_environment
+from request_context import RequestContext
 
 from action_contracts import (
     ACTION_REGISTRY,
@@ -556,6 +557,8 @@ def build_ve_cli_command(
     spec: ActionSpec,
     params: Params,
     env: Mapping[str, str],
+    *,
+    request_context: Optional[RequestContext] = None,
 ) -> List[str]:
     """Build one shell-free ``ve volcsms`` invocation."""
     command = ["ve", VE_CLI_SERVICE, action]
@@ -575,6 +578,9 @@ def build_ve_cli_command(
     ])
     for name, value in runtime_environment.HEADERS.items():
         command.extend(["--header", "{}={}".format(name, value)])
+    if request_context is not None:
+        for name, value in request_context.headers().items():
+            command.extend(["--header", "{}={}".format(name, value)])
     return command
 
 
@@ -872,6 +878,15 @@ def _sanitize_text(
     return safe
 
 
+class PublicDigest(str):
+    """PublicDigest 是本机结果协议中的公开确认摘要，生成边界以 SHA-256 十六进制校验交接。"""
+
+    def __new__(cls, value: str):
+        if not isinstance(value, str) or len(value) != 64 or len(bytes.fromhex(value)) != 32:
+            raise ValueError("PublicDigest must be a SHA-256 hexadecimal digest")
+        return super().__new__(cls, value)
+
+
 def sanitize_output(
     value: Any, *, secrets: Sequence[str] = (), private_fields: frozenset = frozenset(),
     preserve_business_values: bool = False,
@@ -883,10 +898,21 @@ def sanitize_output(
             canonical_key = str(key).replace("-", "").replace("_", "").lower()
             if canonical_key in _SENSITIVE_KEYS or canonical_key in private_fields:
                 continue
-            cleaned[str(key)] = sanitize_output(item, secrets=secrets, private_fields=private_fields, preserve_business_values=preserve_business_values)
+            cleaned[str(key)] = sanitize_output(
+                item, secrets=secrets, private_fields=private_fields,
+                preserve_business_values=preserve_business_values,
+            )
         return cleaned
     if isinstance(value, (list, tuple)):
         return [sanitize_output(item, secrets=secrets, private_fields=private_fields, preserve_business_values=preserve_business_values) for item in value]
+    if isinstance(value, PublicDigest):
+        public_value = str(value)
+        for secret in sorted((secret for secret in secrets if secret), key=len, reverse=True):
+            public_value = public_value.replace(
+                secret,
+                "[REDACTED]",
+            )
+        return public_value
     if isinstance(value, str):
         return _sanitize_text(value, secrets, strip_url_query=not preserve_business_values, truncate=not preserve_business_values)
     return value
@@ -1167,8 +1193,11 @@ def _ve_fallback_error(
             _login_remediation(profile, target="host"),
         ),
         "ve_cli_missing": (
-            "The official Volcengine CLI is not installed.",
-            _ve_install_remediation(),
+            "The Volcengine CLI was not found in the current process PATH.",
+            {
+                "action": "inspect_ve_executable",
+                "if_missing": _ve_install_remediation(),
+            },
         ),
         "ve_cli_unsupported": (
             "The installed Volcengine CLI does not support the required SMS command.",
@@ -1355,18 +1384,44 @@ def select_cli_auth_home(env: Optional[Mapping[str, str]] = None) -> str:
 
 
 def prepare_cli_process_environment(env: Mapping[str, str]) -> Dict[str, str]:
-    """Build a CLI environment that also works in sanitized POSIX sandboxes."""
+    """准备 CLI 子进程环境，复用用户已安装的工具，保留独立的凭据 HOME。"""
     values = dict(env)
-    if os.name != "posix" or str(values.get("USER") or ""):
+    if os.name != "posix":
         return values
     try:
         import pwd
 
-        username = pwd.getpwuid(os.getuid()).pw_name
+        account = pwd.getpwuid(os.getuid())
     except (ImportError, KeyError, OSError):
-        username = ""
-    if username:
-        values["USER"] = username
+        return values
+    if not values.get("USER"):
+        values["USER"] = account.pw_name
+    if shutil.which("ve", path=values.get("PATH", "")) is not None:
+        return values
+    shell = values.get("SHELL") or account.pw_shell
+    if not shell:
+        return values
+
+    # shell 只查询工具路径，业务 CLI 继续使用调用方选择的凭据 HOME。
+    lookup_env = dict(values)
+    lookup_env["HOME"] = account.pw_dir
+    try:
+        completed = subprocess.run(
+            [shell, "-lic", "command -v ve"],
+            env=lookup_env, stdin=subprocess.DEVNULL, capture_output=True,
+            timeout=5, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return values
+    executable = os.fsdecode(completed.stdout).rstrip("\r\n")
+    if (
+        completed.returncode == 0
+        and os.path.isabs(executable)
+        and os.path.isfile(executable)
+        and os.access(executable, os.X_OK)
+    ):
+        directory = os.path.dirname(executable)
+        values["PATH"] = directory + os.pathsep + values.get("PATH", "")
     return values
 
 
@@ -1536,7 +1591,9 @@ class SmsApiClient:
         cli_runner: Optional[CliRunner] = None,
         prefer_ve_cli: Optional[bool] = None,
         timeout: float = DEFAULT_TIMEOUT,
+        request_context: Optional[RequestContext] = None,
     ) -> None:
+        self.request_context = request_context
         self._env = dict(os.environ if env is None else env)
         if profile is not None:
             self._env["VOLCENGINE_PROFILE"] = profile
@@ -1853,7 +1910,9 @@ class SmsApiClient:
             )
         try:
             effective_env = dict(self._env)
-            command = build_ve_cli_command(action, spec, params, effective_env)
+            command = build_ve_cli_command(
+                action, spec, params, effective_env, request_context=self.request_context,
+            )
         except CredentialResolutionError as exc:
             return VeCallOutcome(
                 _error_envelope(
@@ -2064,6 +2123,50 @@ class SmsApiClient:
             )
         return self.call(action, params)
 
+    def _http_attempt(
+        self, action: str, spec: ActionSpec, outbound: request.Request,
+        secrets: Sequence[str], attempt: int,
+        observer: Optional[Callable[[str, Mapping[str, Any]], None]],
+    ) -> Tuple[TransportResponse, Dict[str, Any]]:
+        """_http_attempt 只交接尝试编号和公开结果诊断；观测失败不影响传输。"""
+        def observe(event: str, **fields) -> None:
+            if observer is not None:
+                try:
+                    observer(event, {"attempt": attempt, **fields})
+                except Exception:
+                    pass
+
+        started = time.monotonic()
+        observe("start")
+        diagnostics = {"result_class": "failed", "error_code": "transport_error"}
+        try:
+            response = self._transport(
+                outbound, spec.request_timeout if spec.request_timeout is not None else self._timeout,
+            )
+            envelope = self._normalize(action, spec, response, secrets)
+            error_value = envelope.get("error") or {}
+            diagnostics = {
+                "result_class": "success" if envelope.get("success") else (
+                    "unknown" if error_value.get("outcome_unknown") else "failed"
+                ),
+                "error_code": error_value.get("code"), "request_id": envelope.get("request_id"),
+                "log_id": envelope.get("log_id"), "http_status": response.status,
+            }
+            return response, envelope
+        except Exception as exc:
+            code = "transport_error"
+            if isinstance(exc, ssl.SSLCertVerificationError):
+                code = "tls_certificate_error" if spec.read_only else "outcome_unknown"
+            elif isinstance(exc, (RequestNotSentError, ResponseLostError)):
+                code = "outcome_unknown" if isinstance(exc, ResponseLostError) and not spec.read_only else "network_error"
+            diagnostics = {
+                "result_class": "unknown" if not spec.read_only and not isinstance(exc, RequestNotSentError) else "failed",
+                "error_code": code,
+            }
+            raise
+        finally:
+            observe("end", duration_ms=int((time.monotonic() - started) * 1000), **diagnostics)
+
     def call(
         self,
         action: str,
@@ -2072,6 +2175,7 @@ class SmsApiClient:
         idempotency_key: Optional[str] = None,
         expected_credential_scope: Optional[str] = None,
         use_cli: bool = True,
+        http_attempt_observer: Optional[Callable[[str, Mapping[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         spec = ACTION_REGISTRY.get(action)
         if spec is None:
@@ -2227,12 +2331,14 @@ class SmsApiClient:
         outbound = outbound_request.to_urllib_request()
         for name, value in runtime_environment.HEADERS.items():
             outbound.add_header(name, value)
+        if self.request_context is not None:
+            for name, value in self.request_context.headers().items():
+                outbound.add_header(name, value)
         attempts = 1 + (MAX_READ_RETRIES if spec.read_only else 0)
         for attempt in range(attempts):
             try:
-                transport_response = self._transport(
-                    outbound,
-                    spec.request_timeout if spec.request_timeout is not None else self._timeout,
+                transport_response, envelope = self._http_attempt(
+                    action, spec, outbound, secrets, attempt + 1, http_attempt_observer,
                 )
             except ssl.SSLCertVerificationError as exc:
                 # Verification can fail after urllib follows a redirect, so a
@@ -2278,7 +2384,8 @@ class SmsApiClient:
                 )
             except Exception as exc:  # Transport plugins must not leak tracebacks.
                 return _error_envelope(
-                    action, "transport_error", str(exc), secrets=secrets
+                    action, "transport_error", str(exc), secrets=secrets,
+                    outcome_unknown=not spec.read_only,
                 )
 
             retryable_status = (
@@ -2303,12 +2410,7 @@ class SmsApiClient:
             ):
                 self._sleeper(0.5 * (2**attempt))
                 continue
-            return self._normalize(
-                action,
-                spec,
-                transport_response,
-                secrets,
-            )
+            return envelope
 
         return _error_envelope(  # Defensive: the loop always returns.
             action, "internal_error", "No transport result", secrets=secrets
@@ -2345,6 +2447,7 @@ class SmsApiClient:
                 "http_{}".format(response.status),
                 "HTTP {} returned a non-JSON response".format(response.status),
                 request_id=_request_id({}, response.headers),
+                outcome_unknown=not spec.read_only and response.status >= 500,
                 retryable=spec.read_only
                 and (response.status == 429 or 500 <= response.status <= 599),
                 secrets=secrets,
@@ -2372,6 +2475,9 @@ class SmsApiClient:
                 business_code,
                 message,
                 request_id=request_id,
+                outcome_unknown=not spec.read_only and (
+                    response.status >= 500 or business_code in spec.uncertain_error_codes
+                ),
                 retryable=spec.read_only
                 and (
                     response.status == 429
@@ -2386,6 +2492,7 @@ class SmsApiClient:
                 "http_{}".format(response.status),
                 "HTTP {}".format(response.status),
                 request_id=request_id,
+                outcome_unknown=not spec.read_only and response.status >= 500,
                 retryable=spec.read_only
                 and (response.status == 429 or 500 <= response.status <= 599),
                 secrets=secrets,

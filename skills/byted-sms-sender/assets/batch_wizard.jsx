@@ -676,8 +676,8 @@ function App() {
                   <div className="batch-field-error">请选择定时时间</div>
                 )}
                 <div className="batch-field-help">
-                  定时发送须在未来一个月内，国内消息发送时段为每天
-                  08:00–21:30。
+                  定时发送须在未来 30 天内。国内默认发送时段为
+                  08:00–21:30，具体限制以服务端对当前账号的校验为准。
                 </div>
               </div>
             )}
@@ -850,6 +850,11 @@ function App() {
                   <div><span>有效号码</span><strong>{preview.totalCount}</strong></div>
                   <div><span>重复数据</span><strong>{preview.dupCount}</strong></div>
                 </div>
+                {preview.trafficCheck && (
+                  <Alert type="warning" showIcon title="引流资源检查"
+                    content={`已检查 ${preview.trafficCheck.checkedRows}/${preview.trafficCheck.totalRows} 行，${preview.trafficCheck.missingResourceRows} 行含未查到录入记录的引流内容。${preview.trafficCheck.complete ? '' : '检查尚未覆盖全部内容。'}资源存在不代表报备通过，请核对后再发送。`}
+                  />
+                )}
                 <Descriptions
                   className="batch-confirm-details"
                   border

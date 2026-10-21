@@ -1,17 +1,32 @@
-# 短信服务开通引导
+# 国内短信服务开通
 
-只读短信接口返回 `RE:0001` 时，表示当前账号尚未开通短信服务，使用下面的流程。
+运行 `service-status`，或查询 `ListAllSmsProduct`，核实当前授权账号的国内短信商品 `sms`。
+`available=true` 表示服务与协议已可用，其余状态按接口返回处理；`RE:0001` 时先做此查询。
+实名认证由客户在当前环境的官方控制台办理；接口提示需要认证时，引导客户完成后继续。
 
-执行 `runtime-info`，在可复用客户登录态的浏览器中打开返回的 `console_url`。
-页面需要登录时，由客户在该页面完成登录。Agent 定位自助开通入口并说明：
+## 表单
 
-> 短信服务还没有开通。我已为你打开官方开通页，请阅读协议并点击同意开通；完成后我会继续处理刚才的短信任务。
+展示方式按 [表单展示](form-display.md) 选择。MCP 使用 `open_sms_service_onboarding`，
+通过 `ensure_sms_service_onboarding_visible` 确认展示，完成后用
+`get_sms_service_onboarding_result` 读取结果；CLI 入口为 `service-wizard --display host`。
 
-服务协议与计费条款由客户亲自阅读、勾选并点击最终开通按钮，Agent 负责页面导航和解释。
-宿主缺少浏览器控制能力时，将 `console_url` 作为「短信服务控制台」链接提供给客户。
+页面展示国内短信的当前协议，由客户阅读并确认。首次开通先签协议再开通服务；
+服务已开通且协议更新时，仅展示并签署待更新协议。提交后用 `service-status` 核实结果。
 
-客户完成开通或页面显示开通成功后，执行一次只读 `list-message-groups` 核实；成功即
-恢复原任务，按发送需求准备资源。仍返回 `RE:0001` 时保留任务并说明开通状态尚未生效。
+## 会话回退与控制台
 
-已授权写操作返回 `RE:0001` 时，该次操作按失败处理；服务开通后从新的预览和授权继续。
-需要补办资质时，通过 [qualification-materials.md](qualification-materials.md) 的私密向导办理。
+网页不可用或客户明确选择会话时，用 `service-preview` 展示账号、商品、协议与计费说明。
+客户明确同意协议并确认开通或重签后，执行：
+
+```text
+service-submit --preview-digest <当前摘要> --authorization-digest <客户确认的摘要>
+```
+
+参数和身份由脚本重新核对；结果待核实时，按请求编号和 `service-status` 查询。
+协议使用当前官方版本，价格和结算以账号合同及官方计费说明为准。
+
+接口未发布或权限受限时，通过 `runtime-info` 的 `console_url` 进入官方控制台办理。
+完成后查询服务状态，恢复客户原来的短信任务。
+
+官方依据：[快速入门](https://www.volcengine.com/docs/6361/1840927)、
+[企业实名认证](https://www.volcengine.com/docs/6261/64935)、[国内短信计费](https://www.volcengine.com/docs/6361/67320)。

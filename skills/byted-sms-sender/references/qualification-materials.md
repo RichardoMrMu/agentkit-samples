@@ -1,11 +1,11 @@
 # 资质申请向导
 
-按 [qualification-display.md](qualification-display.md) 打开私密向导，由客户在页面填写
+按 [共同展示与降级规则](form-display.md) 打开私密向导，由客户在页面填写
 和上传材料。Agent 保留同一个前台会话，持续读取结果；页面维护草稿、材料和校验状态。
 
 ## 材料要求
 
-必填项以页面读取的账号规则为准：
+用已有资料预填，客户核对实际使用关系和材料；必填项以页面读取的账号规则为准：
 
 | 材料 | 规则 |
 | --- | --- |
@@ -34,5 +34,7 @@
 前台会话的 `QUALIFICATION_EXCHANGE` 和 `QUALIFICATION_FAILURE` 提供阶段、错误码、
 HTTP 状态、Request ID 和 Log ID。个人信息经掩码展示，图片地址、凭证和校验票据仅展示存在状态。
 最终结果包含申请 ID、状态、草稿版本及诊断标识；完整材料由页面和本机脚本保管。
-页面失联或关闭时向导结束服务，展示问题按 [qualification-display.md](qualification-display.md)
+页面失联或关闭时向导结束服务，展示问题按 [共同展示与降级规则](form-display.md)
 处理，业务问题依据接口错误处理。
+
+向导无法展示时，通过 `runtime-info` 的 `console_url` 进入官方控制台办理资质。

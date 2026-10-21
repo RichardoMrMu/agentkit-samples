@@ -34,6 +34,11 @@ LIVE_VALIDATION_ACTIONS = frozenset(
 # Public account queries only; private qualification/OCR/upload Actions stay in forms.
 PUBLIC_QUERY_ACTIONS = LIVE_VALIDATION_ACTIONS | {
     "ValidateBatchTaskContentForAgent", "TemplateUploadDemoForAgent",
+    "GetTobTrafficDrivingLinkListForAgent",
+    "GetTobTrafficDrivingPhoneListForAgent",
+    "ListRelationTemplateForAgent",
+    "CheckTrafficDrivingExist", "ListThirdTemplate",
+    "AgentGetSignatureTemplateReportStatus",
 }
 
 
@@ -53,6 +58,7 @@ class ActionSpec:
     private_result_fields: frozenset = frozenset()
     # Material APIs retain code-only diagnostics; public resource APIs can expose the message.
     public_error_message: bool = False
+    uncertain_error_codes: frozenset = frozenset()
 
 
 COMMON_PAGE_FIELDS = {
@@ -95,6 +101,10 @@ _QUALIFICATION_OCR_FIELDS = {
 }
 _QUALIFICATION_CHECK_FIELDS = {"status", "ticket"}
 _ACCOUNT_IDENTITY_FIELDS = {"businessName", "userType"}
+_ACCOUNT_SERVICE_FIELDS = _ACCOUNT_IDENTITY_FIELDS | {
+    "businessType", "isNewAccount", "status", "eula", "documents", "mktParam",
+    "list", "product", "productName", "isAllowed", "userStatus",
+}
 _VERIFY_CODE_SEND_FIELDS = {"messageId"}
 _VERIFY_CODE_CHECK_FIELDS = {"status", "sendType"}
 _QUALIFICATION_UPLOAD_TOKEN_FIELDS = {
@@ -111,6 +121,9 @@ _TEMPLATE_APPLICATION_FIELDS = {
     "status",
     "statusDescription",
     "auditOpinion",
+}
+_TRAFFIC_PHONE_FIELDS = {
+    "id", "numberType", "number", "company", "reviewStatus", "createdAt", "updatedAt",
 }
 _SEND_RESULT_FIELDS = {"MessageId", "MessageIds"}
 _STAT_FIELDS = {
@@ -166,6 +179,7 @@ _RESOURCE_PRIVATE_FIELDS = frozenset({
     "operatorperson", "responsiblepersoninfo", "legalperson", "powerofattorney",
     "othermaterials", "businesscertificate", "legalpersonname", "authfilelist",
     "appicpfilelist", "trademarkfilelist", "fileurl", "filecontent",
+    "numberperson", "persontype", "personid",
 })
 
 ACTION_REGISTRY: Dict[str, ActionSpec] = {
@@ -221,9 +235,23 @@ ACTION_REGISTRY: Dict[str, ActionSpec] = {
         "GET",
         True,
         "ListAllSmsProduct",
-        frozenset(_ACCOUNT_IDENTITY_FIELDS),
+        frozenset(_ACCOUNT_SERVICE_FIELDS),
         required_result_fields=frozenset(_ACCOUNT_IDENTITY_FIELDS),
         cli_supported=False,
+    ),
+    "ConfirmProtocolDocument": ActionSpec(
+        SMS_API_VERSION, "POST", False, "ListAllSmsProduct",
+        frozenset({"success", "fail"}),
+        required_result_fields=frozenset({"success", "fail"}),
+        cli_supported=False, public_error_message=True,
+        uncertain_error_codes=frozenset({"1999", "SY:0500", "RE:0000"}),
+    ),
+    "ActivateSmsProductInOneStep": ActionSpec(
+        SMS_API_VERSION, "POST", False, "ListAllSmsProduct",
+        frozenset({"list", "product", "productName", "orderStatus", "orderDetail"}),
+        required_result_fields=frozenset({"list"}),
+        cli_supported=False, public_error_message=True,
+        uncertain_error_codes=frozenset({"1999", "SY:0500", "RE:0000"}),
     ),
     "ValidateBatchTaskContentForAgent": ActionSpec(
         SMS_API_VERSION,
@@ -353,6 +381,7 @@ ACTION_REGISTRY: Dict[str, ActionSpec] = {
         frozenset(_SIGNATURE_APPLICATION_FIELDS),
         required_result_any=frozenset({"applyId", "status"}),
         public_error_message=True,
+        uncertain_error_codes=frozenset({"1999", "SY:0500"}),
     ),
     "ApplySmsTemplateV2": ActionSpec(
         SMS_API_VERSION,
@@ -362,6 +391,58 @@ ACTION_REGISTRY: Dict[str, ActionSpec] = {
         frozenset(_TEMPLATE_APPLICATION_FIELDS),
         required_result_any=frozenset({"templateId", "status"}),
         public_error_message=True,
+    ),
+    "ApplySmsTemplateV2ForAgent": ActionSpec(
+        SMS_API_VERSION, "POST", False, "ListSecondTemplate",
+        frozenset(_TEMPLATE_APPLICATION_FIELDS),
+        required_result_any=frozenset({"templateId", "status"}),
+        cli_supported=False, public_error_message=True,
+        uncertain_error_codes=frozenset({"1999", "SY:0500"}),
+    ),
+    "CheckTrafficDrivingExist": ActionSpec(
+        SMS_API_VERSION, "GET", True, "CheckTrafficDrivingExist", None,
+        required_result_fields=frozenset({"list"}),
+        cli_supported=False, public_error_message=True,
+        private_result_fields=_RESOURCE_PRIVATE_FIELDS,
+    ),
+    "ListThirdTemplate": ActionSpec(
+        SMS_API_VERSION, "GET", True, "ListThirdTemplate", None,
+        required_result_fields=frozenset({"list"}),
+        cli_supported=False, public_error_message=True,
+        private_result_fields=_RESOURCE_PRIVATE_FIELDS,
+    ),
+    "AgentGetSignatureTemplateReportStatus": ActionSpec(
+        SMS_API_VERSION, "GET", True, "AgentGetSignatureTemplateReportStatus", None,
+        required_result_any=frozenset({"CMCC", "CUCC", "CTCC"}),
+        cli_supported=False, public_error_message=True,
+        private_result_fields=_RESOURCE_PRIVATE_FIELDS | frozenset({"content"}),
+    ),
+    "GetTobTrafficDrivingLinkListForAgent": ActionSpec(
+        SMS_API_VERSION, "GET", True, "GetTobTrafficDrivingLinkListForAgent", None,
+        required_result_fields=frozenset({"list", "total"}),
+        cli_supported=False, public_error_message=True,
+    ),
+    "GetTobTrafficDrivingPhoneListForAgent": ActionSpec(
+        SMS_API_VERSION, "GET", True, "GetTobTrafficDrivingPhoneListForAgent",
+        _fields(_TRAFFIC_PHONE_FIELDS),
+        required_result_fields=frozenset({"list", "total"}),
+        cli_supported=False, public_error_message=True,
+    ),
+    "ListRelationTemplateForAgent": ActionSpec(
+        SMS_API_VERSION, "GET", True, "ListRelationTemplateForAgent", None,
+        required_result_fields=frozenset({"list", "total"}),
+        cli_supported=False, public_error_message=True,
+        private_result_fields=_RESOURCE_PRIVATE_FIELDS,
+    ),
+    "BulkCreateTobTrafficDrivingLinkForAgent": ActionSpec(
+        SMS_API_VERSION, "POST", False, "GetTobTrafficDrivingLinkListForAgent",
+        frozenset(), cli_supported=False, public_error_message=True,
+        uncertain_error_codes=frozenset({"1999", "SY:0500"}),
+    ),
+    "BulkCreateTobTrafficDrivingPhoneForAgent": ActionSpec(
+        SMS_API_VERSION, "POST", False, "GetTobTrafficDrivingPhoneListForAgent",
+        frozenset(), cli_supported=False,
+        uncertain_error_codes=frozenset({"1999", "SY:0500"}),
     ),
     "SendSmsForAgent": ActionSpec(
         SMS_API_VERSION,

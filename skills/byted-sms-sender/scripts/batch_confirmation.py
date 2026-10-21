@@ -14,7 +14,7 @@ import sqlite3
 import stat
 import tempfile
 import time
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, Mapping, Optional
 
 import runtime_environment
 
@@ -31,6 +31,12 @@ CREATE_REJECTION_CODES = frozenset({
 TASK_FIELDS = frozenset(
     {"taskId", "subAccount", "taskName", "signature", "templateId", "templateName", "channelType", "status", "totalCount", "dupCount", "scheduled", "sendTime", "sendContent"}
 )
+
+
+def canonical_digest(payload: Mapping[str, Any]) -> str:
+    """canonical_digest 沿用既有摘要编码；签名和群发共用，已有确认记录仍然有效。"""
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class BatchConfirmationError(ValueError):

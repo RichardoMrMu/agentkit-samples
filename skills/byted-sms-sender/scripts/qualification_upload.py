@@ -1101,9 +1101,12 @@ def _validated_image_bytes(data: bytes, content_type: str) -> Tuple[bytes, str]:
 
 
 def _apply_image_upload(
-    credentials: ImageXCredentials, *, timeout: float
+    credentials: ImageXCredentials,
+    *,
+    timeout: float,
+    file_extension: Optional[str] = None,
 ) -> Mapping[str, Any]:
-    query = (
+    query = [
         ("Action", "ApplyImageUpload"),
         ("Version", IMAGEX_VERSION),
         ("ServiceId", IMAGEX_SERVICE_ID),
@@ -1111,7 +1114,10 @@ def _apply_image_upload(
         ("UploadNum", "1"),
         ("uid", IMAGEX_USER_ID),
         ("appid", IMAGEX_APP_ID),
-    )
+    ]
+    if file_extension is not None:
+        query.append(("FileExtension", file_extension))
+    query = tuple(query)
     req = _aws_sign(
         "GET",
         query,
@@ -1253,14 +1259,19 @@ def _commit_image_upload(
     return image_uri
 
 
-def _upload_one_image(
+def _upload_one_material(
     credentials: ImageXCredentials,
     data: bytes,
     content_type: str,
     *,
     timeout: float,
+    file_extension: Optional[str] = None,
 ) -> str:
-    apply_result = _apply_image_upload(credentials, timeout=timeout)
+    apply_result = _apply_image_upload(
+        credentials,
+        timeout=timeout,
+        file_extension=file_extension,
+    )
     upload_address = apply_result.get("UploadAddress")
     if not isinstance(upload_address, Mapping):
         raise QualificationUploadError(
@@ -1284,7 +1295,7 @@ def upload_qualification_file_bytes(
     timeout = max(1.0, float(client._timeout))
     image_credentials = _load_image_credentials(client)
     try:
-        image_uri = _upload_one_image(
+        image_uri = _upload_one_material(
             image_credentials, data, content_type, timeout=timeout
         )
     finally:
@@ -1292,6 +1303,41 @@ def upload_qualification_file_bytes(
     return {
         "imageUri": image_uri,
         "imageSuffix": "png" if content_type == "image/png" else "jpg",
+    }
+
+
+def upload_material_file_bytes(
+    client: SmsApiClient,
+    data: bytes,
+    suffix: str,
+    content_type: str,
+) -> Dict[str, str]:
+    """upload_material_file_bytes 通过统一 ImageX 链路上传图片或普通材料。"""
+    if not isinstance(data, bytes) or not data:
+        raise QualificationUploadError(
+            "invalid_material_size",
+            "Material file must not be empty.",
+        )
+    if not isinstance(suffix, str) or not suffix:
+        raise QualificationUploadError(
+            "invalid_material_type",
+            "Material file suffix is required.",
+        )
+    timeout = max(1.0, float(client._timeout))
+    image_credentials = _load_image_credentials(client)
+    try:
+        file_uri = _upload_one_material(
+            image_credentials,
+            data,
+            content_type,
+            timeout=timeout,
+            file_extension=None if content_type.startswith("image/") else "." + suffix,
+        )
+    finally:
+        image_credentials = None
+    return {
+        "fileUri": file_uri,
+        "fileSuffix": suffix,
     }
 
 
@@ -1310,7 +1356,7 @@ def upload_and_ocr_business_certificate_bytes(
     timeout = max(1.0, float(client._timeout))
     image_credentials = _load_image_credentials(client)
     try:
-        image_uri = _upload_one_image(
+        image_uri = _upload_one_material(
             image_credentials, data, content_type, timeout=timeout
         )
     finally:
@@ -1360,10 +1406,10 @@ def upload_and_ocr_identity_document_bytes(
     timeout = max(1.0, float(client._timeout))
     image_credentials = _load_image_credentials(client)
     try:
-        front_uri = _upload_one_image(
+        front_uri = _upload_one_material(
             image_credentials, front_data, front_content_type, timeout=timeout
         )
-        back_uri = _upload_one_image(
+        back_uri = _upload_one_material(
             image_credentials, back_data, back_content_type, timeout=timeout
         )
     finally:
