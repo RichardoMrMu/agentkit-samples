@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import sys
@@ -6,13 +7,11 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent))
 from agentkit.apps import AgentkitAgentServerApp
+from google.adk.tools import ToolContext
 from veadk import Agent
 from veadk.memory.short_term_memory import ShortTermMemory
-from prompts.prompt import ROOT_AGENT_INSTRUCTION_CN, ROOT_AGENT_INSTRUCTION_EN
-
-from google.adk.skills import load_skill_from_dir
-from google.adk.tools.skill_toolset import SkillToolset
-from veadk.skills import VeSkillRegistry
+from veadk.tools.builtin_tools.execute_skills import execute_skills as _execute_skills
+from sandbox_stream import SkillSandboxA2aAgent
 
 logger = logging.getLogger(__name__)
 
@@ -20,74 +19,82 @@ app_name = "skill_agent"
 user_id = "skill_agent_user"
 session_id = "skill_agent_session"
 
+ROOT_AGENT_INSTRUCTION_CN = """
+你是一个技能执行小助手，但你不能直接执行技能，只能调用 execute_skills 工具。
+收到任何需要技能能力、技能列表、文件处理、测试或自动化的请求时，都必须把用户请求原样整理为 workflow_prompt 后调用 execute_skills。
+"""
+
+ROOT_AGENT_INSTRUCTION_EN = """
+You are a skill execution assistant. You cannot execute skills directly; you can only call the execute_skills tool.
+For any request that needs skill capabilities, skill listing, file processing, testing, or automation, convert the user request into workflow_prompt and call execute_skills.
+"""
+
+SANDBOX_GUARDRAILS_CN = """
+执行前请遵守以下约束：
+1. 如果需要执行 Shell 命令，只能调用 bash_tool，禁止调用 bash。
+2. 可用的技能环境工具名包括 skills_tool、read_file_tool、write_file_tool、edit_file_tool、bash_tool、register_skills_tool、update_check_list。
+3. 如果用户只是要求测试 skill，请执行轻量测试：先列出可用技能，再选择一个不需要安装新依赖的最小动作验证工具链路。
+4. 不要尝试向系统 Python 或 /opt/agentkit-skill/.venv 安装包；除非用户明确要求，否则不要安装依赖。
+"""
+
+SANDBOX_GUARDRAILS_EN = """
+Before execution, follow these constraints:
+1. If shell execution is needed, call bash_tool only. Do not call bash.
+2. Available skill-environment tool names include skills_tool, read_file_tool, write_file_tool, edit_file_tool, bash_tool, register_skills_tool, and update_check_list.
+3. If the user only asks to test skills, run a lightweight test: list available skills first, then choose a minimal action that does not require installing new dependencies.
+4. Do not install packages into system Python or /opt/agentkit-skill/.venv. Unless explicitly requested by the user, do not install dependencies.
+"""
+
 ROOT_AGENT_INSTRUCTION = ROOT_AGENT_INSTRUCTION_CN
+SANDBOX_GUARDRAILS = SANDBOX_GUARDRAILS_CN
 
 provider = os.getenv("CLOUD_PROVIDER")
 if provider and provider.lower() == "byteplus":
     ROOT_AGENT_INSTRUCTION = ROOT_AGENT_INSTRUCTION_EN
+    SANDBOX_GUARDRAILS = SANDBOX_GUARDRAILS_EN
 
 
-def _build_skill_toolset() -> SkillToolset | None:
+async def execute_skills(
+    workflow_prompt: str,
+    tool_context: ToolContext = None,
+    timeout: int = 1800,
+) -> str:
+    """Execute a workflow in Skill Sandbox and return its final result.
+
+    Args:
+        workflow_prompt: The complete user workflow to execute remotely.
+        timeout: Maximum execution time in seconds, from 1 to 1800.
     """
-    Function Purpose:
-        根据本地技能目录和远程 Skill Space 配置构建技能工具集。
-
-    Implementation Logic:
-        优先读取 SKILL_DIR；未配置时向上查找仓库内置技能目录。
-        本地技能和远程注册表均为可选项，避免缺少任一配置时阻断 Agent 启动。
-    """
-    skill_dir_value = os.getenv("SKILL_DIR")
-    if skill_dir_value:
-        skill_dir = Path(skill_dir_value).expanduser()
-    else:
-        skill_dir = next(
-            (
-                parent / "skills" / "byted-music-generate"
-                for parent in Path(__file__).resolve().parents
-                if (parent / "skills" / "byted-music-generate").is_dir()
-            ),
-            None,
-        )
-
-    local_skills = []
-    if skill_dir and skill_dir.is_dir():
-        local_skills.append(load_skill_from_dir(str(skill_dir)))
-    elif skill_dir:
-        logger.warning("Skill directory does not exist: %s", skill_dir)
-
-    skill_space_id = os.getenv("SKILL_SPACE_ID")
-    remote_registry = (
-        VeSkillRegistry(skill_source_id=skill_space_id) if skill_space_id else None
+    guarded_prompt = (
+        f"{SANDBOX_GUARDRAILS}\n\n用户请求 / User request:\n{workflow_prompt}"
+    )
+    return await asyncio.to_thread(
+        _execute_skills,
+        workflow_prompt=guarded_prompt,
+        tool_context=tool_context,
+        timeout=timeout,
     )
 
-    if not local_skills and remote_registry is None:
-        logger.warning(
-            "No local skill or SKILL_SPACE_ID configured; start without SkillToolset."
-        )
-        return None
-
-    return SkillToolset(
-        skills=local_skills or None,
-        registry=remote_registry,
-    )
-
-
-skill_toolset = _build_skill_toolset()
 
 agent = Agent(
     name="skill_agent",
     model_name=os.getenv("MODEL_AGENT_NAME", "deepseek-v4-pro-260425"),
     instruction=ROOT_AGENT_INSTRUCTION,
-    tools=[skill_toolset] if skill_toolset else [],
+    tools=[execute_skills],
 )
 
 short_term_memory = ShortTermMemory(backend="local")
 
-# using veadk web for debugging
-root_agent = agent
+# Keep the original LLM/function-tool path available for compatibility.
+# The bridge streams remote events directly, without a second LLM rewriting them.
+root_agent = (
+    SkillSandboxA2aAgent(name=app_name, guardrails=SANDBOX_GUARDRAILS)
+    if os.getenv("SKILL_SANDBOX_STREAMING", "true").lower() in {"true", "1", "yes"}
+    else agent
+)
 
 agent_server_app = AgentkitAgentServerApp(
-    agent=agent,
+    agent=root_agent,
     short_term_memory=short_term_memory,
 )
 

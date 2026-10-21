@@ -199,10 +199,10 @@ source .venv/bin/activate
 ### 环境准备
 
 ```bash
-# 配置 AgentKit 工具 ID（aio sandbo必需）
-export AGENTKIT_TOOL_ID=<Your_Tool_ID>
+# 配置远端 Skills Sandbox 的工具 ID（主入口必需）
+export AGENTKIT_TOOL_ID_SKILLS=<Your_Skills_Sandbox_Tool_ID>
 
-# 配置 AgentKit Skill Space ID（必需，填写 ss- 开头的技能空间 ID）
+# 仅使用 SkillToolset/Registry 的 advanced 示例需要配置此变量
 export SKILL_SPACE_ID=<Your_Skill_Space_ID>
 
 # 火山引擎访问凭证（必需）
@@ -210,7 +210,11 @@ export VOLCENGINE_ACCESS_KEY=<Your Access Key>
 export VOLCENGINE_SECRET_KEY=<Your Secret Key>
 ```
 
-`agent.py` 会通过 `SKILL_SPACE_ID` 读取远端 Skill Space。请在启动本地服务前完成配置，否则无法初始化远端 Skill Registry。
+`agent.py` 默认通过 A2A `message/stream` 委托远端 Skills Sandbox，将文本增量作为 ADK partial Event 返回。技能来源由远端 Sandbox 配置；主入口不读取本地 `SKILL_SPACE_ID` 或 `SKILL_DIR`。`advanced/a2a/` 中各示例仍沿用各自的技能加载方式。
+
+设置 `SKILL_SANDBOX_STREAMING=false` 可切回原有 LLM + `execute_skills` 工具路径。流式入口收到 `streaming=false` 请求时仍走原有同步任务轮询；远端明确拒绝流式协议时也回退到该路径。已开始的流发生断连会返回错误，不会重新提交任务。
+
+macOS 本地调试时设置 `VEADK_SKILLS_WORK_DIR=/tmp/veadk_skills/sessions`，避免默认 Linux 路径不可写。
 
 ### 调试方法
 
@@ -225,6 +229,11 @@ veadk web --port 8080
 ```
 
 Web 界面提供图形化对话测试环境，支持实时查看消息流和调试信息。
+
+在 Web 中开启 Streaming；直接调用 `/run_sse` 时设置 `streaming=true`。远端 Sandbox 必须同时支持 A2A streaming 和模型文本增量；仅有 SSE 连接不能保证正文逐段到达。取消或超时会尝试 `tasks/cancel`，若远端不支持取消，任务仍可能继续执行。
+
+
+离线回归测试：`python -m unittest -v test_sandbox_stream`。
 
 此外，还可以使用命令行测试，调试 agent.py。
 

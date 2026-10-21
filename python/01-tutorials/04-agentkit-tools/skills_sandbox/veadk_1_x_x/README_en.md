@@ -203,10 +203,10 @@ source .venv/bin/activate
 ### Prepare the Environment
 
 ```bash
-# Configure the AgentKit tool ID (required for the AIO Sandbox)
-export AGENTKIT_TOOL_ID=<Your_Tool_ID>
+# Configure the remote Skills Sandbox tool ID (required for the main entry point)
+export AGENTKIT_TOOL_ID_SKILLS=<Your_Skills_Sandbox_Tool_ID>
 
-# Configure the AgentKit Skill Space ID (required; use the ID beginning with ss-)
+# Only the advanced SkillToolset/Registry examples require this variable
 export SKILL_SPACE_ID=<Your_Skill_Space_ID>
 
 # BytePlus access credentials (required)
@@ -216,9 +216,18 @@ export CLOUD_PROVIDER=byteplus
 export BYTEPLUS_REGION=ap-southeast-1
 ```
 
-`agent.py` reads the remote Skill Space from `SKILL_SPACE_ID`. Set it before starting the local service; otherwise, the remote Skill Registry cannot be initialized.
+The main `agent.py` entry point requires `AGENTKIT_TOOL_ID_SKILLS` (or the existing `AGENTKIT_TOOL_ID` fallback). It delegates to the remote Skills Sandbox using A2A `message/stream` and yields ADK partial events. Skills are configured in the remote Sandbox; this entry point does not read local `SKILL_SPACE_ID` or `SKILL_DIR`. The advanced examples retain their own skill-loading configuration.
+
+Set `SKILL_SANDBOX_STREAMING=false` to restore the original LLM + `execute_skills` tool path. Requests with `streaming=false`, and explicit rejections of the streaming protocol, use the existing synchronous task polling. An interrupted stream reports an error without resubmitting the task.
+
+For local macOS debugging, set `VEADK_SKILLS_WORK_DIR=/tmp/veadk_skills/sessions` to avoid the default Linux work directory.
 
 ### Debugging
+
+
+Enable Streaming in the Web UI, or pass `streaming=true` to `/run_sse`. The remote Sandbox must support both A2A streaming and model text deltas. An SSE connection alone does not guarantee incremental text. On cancellation or timeout the bridge attempts `tasks/cancel`; remote execution may continue if cancellation is unsupported.
+
+Run offline regression tests with `python -m unittest -v test_sandbox_stream`.
 
 ```bash
 # Enter the project directory
