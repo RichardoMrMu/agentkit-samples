@@ -33,6 +33,10 @@ import sms_cli
 
 
 APP_VERSION = "1.12.0"
+PLATFORM_SCHEMA = {
+    "type": "string", "maxLength": 256,
+    "description": "Agent 自报当前运行产品名，如豆包工作、Codex；不确定填 unknown",
+}
 APP_RESOURCE_URI = "ui://volcengine-sms/qualification-v3.html"
 APP_MIME_TYPE = "text/html;profile=mcp-app"
 APP_TOOL_META = {
@@ -225,7 +229,7 @@ class QualificationFlow:
     display_mode: str = "mcp-app"
     finished_at: Optional[float] = None
     parameters: Dict[str, Any] = field(default_factory=dict)
-    request_context: RequestContext = field(default_factory=lambda: RequestContext.create("mcp"))
+    request_context: RequestContext = field(default_factory=lambda: RequestContext.create())
 
 
 class PrivateFormFlowManager:
@@ -275,7 +279,7 @@ class PrivateFormFlowManager:
                 return active
             flow = QualificationFlow(
                 uuid.uuid4().hex, parameters=parameters,
-                request_context=request_context or RequestContext.create("mcp"),
+                request_context=request_context or RequestContext.create(),
             )
             self._flows[flow.flow_id] = flow
             _emit_mcp_app_event(
@@ -524,7 +528,7 @@ def _service_form_tools() -> List[Dict[str, Any]]:
         "description": "打开国内短信服务确认页，按当前状态完成服务开通或更新协议重新签署。",
         "inputSchema": {
             "type": "object",
-            "properties": {},
+            "properties": {"platform": dict(PLATFORM_SCHEMA)},
             "additionalProperties": False,
         },
         "annotations": {
@@ -618,6 +622,7 @@ def _run_batch_form(client: SmsApiClient, *, display, cancel_event, on_display_r
 
 def _batch_form_tools() -> List[Dict[str, Any]]:
     properties = {
+        "platform": dict(PLATFORM_SCHEMA),
         "subAccount": {"type": "string", "minLength": 1,
                        "description": "消息组 ID，取模板 SubAccounts；All 范围时从 GetSubAccountListForAgent 返回的 subAccountId 选择"},
         "taskName": {"type": "string", "minLength": 1},
@@ -673,6 +678,7 @@ def _traffic_form_tools() -> List[Dict[str, Any]]:
         ),
         "inputSchema": {
             "type": "object", "properties": {
+                "platform": dict(PLATFORM_SCHEMA),
                 "kind": {"type": "string", "enum": ["link", "phone"]},
                 "params": {
                     "type": "object",
@@ -730,6 +736,7 @@ def _signature_form_tools() -> List[Dict[str, Any]]:
         "name": "open_signature_application", "title": "打开预填签名申请表单",
         "description": "预填签名及消息组，发送类型固定全选验证码、通知、营销；客户核对资质、材料和范围后确认提交。",
         "inputSchema": {"type": "object", "properties": {
+            "platform": dict(PLATFORM_SCHEMA),
             "params": {"type": "object", "properties": properties, "additionalProperties": False},
         }, "additionalProperties": False},
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True},
@@ -761,7 +768,6 @@ class QualificationMcpServer:
         service_flow_manager: Optional[PrivateFormFlowManager] = None,
         signature_flow_manager: Optional[PrivateFormFlowManager] = None,
     ) -> None:
-        self._client_info: Optional[Mapping[str, Any]] = None
         self._flows = flow_manager or QualificationFlowManager()
         self._batch_flows = batch_flow_manager or PrivateFormFlowManager(
             SmsApiClient, runner=_run_batch_form, protocol=BATCH_FLOW_PROTOCOL
@@ -803,7 +809,7 @@ class QualificationMcpServer:
                 "name": "open_qualification_application",
                 "title": "打开火山引擎短信资质表单",
                 "description": "在私密表单中创建短信资质；敏感材料不会进入对话。",
-                "inputSchema": {"type": "object", "properties": {}},
+                "inputSchema": {"type": "object", "properties": {"platform": dict(PLATFORM_SCHEMA)}},
                 "annotations": {
                     "readOnlyHint": False,
                     "destructiveHint": False,
@@ -894,6 +900,7 @@ class QualificationMcpServer:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
+                        "platform": dict(PLATFORM_SCHEMA),
                         "action": {"type": "string", "enum": sorted(PUBLIC_QUERY_ACTIONS)},
                         "params": {"type": "object"},
                         "argv": {
@@ -924,6 +931,7 @@ class QualificationMcpServer:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
+                        "platform": dict(PLATFORM_SCHEMA),
                         "argv": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -993,7 +1001,11 @@ class QualificationMcpServer:
         arguments = params.get("arguments")
         if not isinstance(arguments, Mapping):
             arguments = {}
-        request_context = request_context or RequestContext.create("mcp", client_info=self._client_info)
+        arguments = dict(arguments)
+        platform = arguments.pop("platform", None)
+        request_context = request_context or RequestContext.create(
+            platform=platform,
+        )
         if name == "open_signature_application":
             if set(arguments) - {"params"}:
                 raise ValueError("签名表单只接收 params 业务参数")
@@ -1293,11 +1305,6 @@ class QualificationMcpServer:
         try:
             if method == "initialize":
                 params = message.get("params")
-                client_info = params.get("clientInfo") if isinstance(params, Mapping) else None
-                self._client_info = (
-                    {"name": client_info.get("name"), "version": client_info.get("version")}
-                    if isinstance(client_info, Mapping) else None
-                )
                 protocol_version = (
                     params.get("protocolVersion")
                     if isinstance(params, Mapping)
@@ -1346,7 +1353,9 @@ class QualificationMcpServer:
                 params = message.get("params")
                 if not isinstance(params, Mapping):
                     raise ValueError("params are required")
-                request_context = RequestContext.create("mcp", client_info=self._client_info)
+                arguments = params.get("arguments")
+                platform = arguments.get("platform") if isinstance(arguments, Mapping) else None
+                request_context = RequestContext.create(platform=platform)
                 result = self._call_tool(params, request_context=request_context)
             elif method == "resources/list":
                 result = {

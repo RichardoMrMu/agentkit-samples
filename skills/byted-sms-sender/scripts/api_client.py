@@ -2333,7 +2333,7 @@ class SmsApiClient:
             outbound.add_header(name, value)
         if self.request_context is not None:
             for name, value in self.request_context.headers().items():
-                outbound.add_header(name, value)
+                outbound.add_header(name, value.encode("utf-8"))
         attempts = 1 + (MAX_READ_RETRIES if spec.read_only else 0)
         for attempt in range(attempts):
             try:

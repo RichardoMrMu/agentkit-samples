@@ -2174,6 +2174,7 @@ def _json_object(raw: str) -> Dict[str, Any]:
 
 def build_parser() -> JsonArgumentParser:
     parser = JsonArgumentParser(description="Volcengine domestic SMS")
+    parser.add_argument("--platform", help="Agent 自报当前运行产品名，如豆包工作、Codex；不确定填 unknown")
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("runtime-info", help="show the installed package environment")
@@ -2381,8 +2382,9 @@ def main(
     command = effective_argv[0] if effective_argv else "sms"
     try:
         args = build_parser().parse_args(effective_argv)
+        command = args.command
         if client is None:
-            request_context = request_context or RequestContext.create("cli")
+            request_context = request_context or RequestContext.create(platform=args.platform)
             client = SmsApiClient(
                 profile=getattr(args, "profile", None), request_context=request_context,
             )

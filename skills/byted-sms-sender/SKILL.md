@@ -20,6 +20,8 @@ Agent 按客户目标选择所需能力，负责工具调用、资源查询和�
 使用相应 read/write 工具的 `argv`。无 MCP 时运行
 `python3 -E -B <skill目录>/scripts/sms_cli.py`，原生查询为
 `api-read --action <Action> --params '<JSON>'`。环境由安装包固定，参数可查 `--help`。
+创建表单或执行 read/write 工具时，Agent 自报运行产品名到顶层 `platform`；CLI 在命令前传
+`--platform <产品名>`（如豆包工作、Codex）。无明确宿主信息填 `unknown`，不要按模型名或发布渠道猜测。
 
 资质材料、号码名单和凭据留在私密表单及本机，对话展示摘要。
 查询保留业务字段和审核维度，由 Agent 按客户问题解释；写操作按当前预览确认，结果未知时先查询核实。

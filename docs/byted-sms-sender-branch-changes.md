@@ -2,38 +2,50 @@
 
 ## 同步来源
 
-以 `agent` 仓库的 **`feat/sms-traffic-driving`** 分支为来源，按 AgentKit 渠道生成正式环境包，
-完整同步到本仓库的 [`skills/byted-sms-sender/`](../skills/byted-sms-sender/SKILL.md)。
+以 `agent` 仓库的 **`feat/sms-traffic-driving`** 分支为来源，按 AgentKit 渠道重新打包，
+同步到本仓库的 [`skills/byted-sms-sender/`](../skills/byted-sms-sender/SKILL.md)。
 
 | 项目 | 本次取值 |
 | --- | --- |
-| 同步日期 | 2026-10-20 |
+| 同步日期 | 2026-10-22 |
 | 源分支 | `feat/sms-traffic-driving` |
-| 源提交 | `0571acbd293181acb4eec57a20b544d38278dd94` |
+| 源提交 | `aa6fb3711a72d06c6e01e1fc2ae5415cdafa92b3` |
 | 源工作树 | `/Users/shayne/.codex/worktrees/sms-traffic-validation/agent`，与 `/Users/shayne/workspace/ai/agent` 属于同一 Git 仓库 |
 | 源目录 | `skills/specs/skills/byted-sms-sender/` |
-| 目标分支 | `feat/sms-skill-1.4.6` |
-| 本轮对比基线 | `5541be2877858069f7c697f6a8628eb0fd45fc69` |
+| 目标分支 | `feat/sms-skill-source-fields` |
+| 本轮对比基线 | `a7cdda738b473cc6a0fefad717f140fca214c682` |
 | 版本 | 1.4.6 |
 | 渠道 / 环境 | `skills/profiles/public/agentkit.yaml` / `prod` |
-| 发布文件 | 66 个；相对本轮基线新增 3 个、修改 28 个、删除 1 个 |
+| 发布文件 | 66 个；本轮修改 6 个，无新增或删除 |
 
-源工作树保持干净，打包使用 `--require-clean`。本仓库的发布文件逐一核对哈希和权限，
-与该提交生成的完整 Skill 目录一致；已有本机缓存不属于发布文件。
+打包使用 `--require-clean`，构建输入均已提交。本轮保留源工作树中
+`.agent/specs/ops/sms_request_source.md` 的既有未提交改动，该文件不属于发布包或构建输入。
+只同步生成包内的 Skill 文件，打包脚本、测试、ZIP 和构建记录保留在包外。
 
-## 本轮同步的主要差异
+## 本轮改动
 
-- 入口明确包含运营商报备查询，并增加独立的
-  [报备查询说明](../skills/byted-sms-sender/references/report-status.md)。
-- 增加统一的[表单展示与回退说明](../skills/byted-sms-sender/references/form-display.md)，
-  替换原资质展示说明。
-- 新增 `scripts/template_application.py`，同步模板参数、账号变量配置及固定引流信息预校验。
-- 同步该分支的签名表单、材料上传及确认流程；签名申请类型固定全选验证码、通知和营销。
-- 同步 CSV 示例指引、CLI 路径查找、公共确认摘要及其他对应脚本和说明。
+来源上报收敛为三个请求头：
 
-## 构建与一致性
+| 请求头 | 取值 |
+| --- | --- |
+| `X-Request-Source` | 固定为 `skill` |
+| `X-Skill-Version` | 从包内版本文件读取，本次为 `1.4.6` |
+| `X-Platform` | Agent 自报的运行产品名；不明确时为 `unknown` |
 
-在源工作树根目录，使用锁定依赖执行：
+- CLI 在子命令前传 `--platform <产品名>`；MCP 创建表单及执行 read/write 工具时传顶层
+  `platform`，入口取出后写入操作上下文，不进入业务参数、预填数据、确认摘要或幂等键。
+- 平台名按声明原值交接，中文在 HTTP 请求头中按 UTF-8 字节发送，CLI 接收原始字符串。
+- 原 Skill 名称、渠道、执行方式、操作编号及 MCP 宿主信息不再作为来源请求头发送。
+  本机操作编号仍用于日志和流程关联；后台表单保留创建时的上下文。
+- `scripts/skill_metadata.json` 仅冻结版本；包版本缺失或非法时明确省略版本并保留本机诊断。
+
+修改文件为 `SKILL.md`、`scripts/api_client.py`、`scripts/qualification_mcp_server.py`、
+`scripts/request_context.py`、`scripts/skill_metadata.json` 和 `scripts/sms_cli.py`。
+来源声明仅用于统计，不参与账号鉴权、凭据作用域或业务确认。
+
+## 构建与核验
+
+在源工作树根目录，使用 `skills/requirements-dev.txt` 锁定的依赖执行：
 
 ```bash
 python -E -B skills/scripts/package_skill.py \
@@ -44,42 +56,24 @@ python -E -B skills/scripts/package_skill.py \
 
 构建包：`byted-sms-sender-1.4.6-prod.zip`。
 
-SHA-256：`d77b66a250b5a29a52422ade029aade72dd3cb60c33da62698588512f4fd424d`。
+SHA-256：`1def0a9a443ad893a619f4a8a53ef293316c13682c4a04451fdded7973ee41b2`。
 
-## 本轮验证
+本轮使用该源分支的最新测试脚本，验证同步后的代码及打包入口：
 
-最近一次完整验证基于源提交 `1bc8578af`，用该分支的测试脚本在临时目录中引用本仓库代码和页面：
+- Python 行为测试 **310/310 通过**，无失败、错误或跳过。
+- 另 1 项按原测试前提显式模拟缺失来源元数据并通过；正式包版本文件和三个来源请求头另行核验。
+- 版本打包、CLI 及 stdio MCP 启动入口测试 **3/3 通过**，使用临时测试包和模拟 CLI。
+- 覆盖中文平台名的 HTTP 实际字节、HTTP 与 CLI 字段一致性、MCP 顶层参数隔离、表单并发与重试，
+  以及业务参数、凭据作用域和写入确认保持原有约束。
+- 20 个 Python 脚本通过 Python 3.10 语法检查；CLI `--help`、
+  `--platform Codex runtime-info`、`quick_validate.py` 和 `git diff --check` 通过。
+- 66 个发布文件的哈希及权限与构建记录一致。页面资源本轮无变化，验证聚焦来源脚本与版本打包。
 
-- Python 行为测试 **310/310 通过**，无失败、无错误、无跳过。
-- 另 1 项按原测试要求显式模拟“缺失来源元数据”的前提并通过；正式包元数据另行核验为
-  `1.4.6 / agentkit`。没有为测试修改生产代码或源测试。
-- 页面测试 **30/30 通过**，包含签名、引流页面关闭通知的鉴权、JSON 请求头和 `keepalive` 验证。
-- 之前失败的 6 个测试方法及其 9 处断言已通过。新增用例验证非法签名类型在 CLI、MCP 的
-  预览和提交入口均返回 `argument_error`，且不会提交申请。
-- 20 个 Python 脚本通过 Python 3.10 语法检查；5 个页面脚本通过语法检查。
-- CLI `--help`、`runtime-info`、`quick_validate.py` 和 `git diff --check` 通过。
-- 66 个发布文件及文件权限与构建记录一致。
-
-上一轮 `0811ee0f5` 的失败日志保留；本轮结论来自最新提交重新生成的包和重新执行的测试，
-不将新结果覆盖为旧版本已通过。
-
-按 `codex-code-review` 核对同步差异、源包一致性及验证结果。业务代码仍位于短信 Skill，
-本轮未增加平台业务逻辑或新的抽象。参数校验错误分类、非法输入不提交和关闭通知鉴权均已验证。
+按 `codex-code-review` 复核本轮差异，未发现新增阻断问题。改动仅涉及短信 Skill 和同步说明，
+未增加通用平台业务逻辑或额外抽象。
 
 ## 当前状态
 
-本次同步使用 `feat/sms-traffic-driving` 的干净提交 `0571acbd2`，源分支内容未修改。
-该提交已包含安全扫描修复，以及签名参数错误分类和行为测试修复。
-目标分支为 `feat/sms-skill-1.4.6`，对应 MR !564；提交、推送和检查状态以 Git 及 MR 当前记录为准。
-此前 `5541be28` 的扫描通过记录仅对应旧提交，本次提交的远端检查需单独核验。
-未执行真实开通、申请、报备查询或短信发送。
-
-## 摘要脱敏扫描修复
-
-本次 `0571acbd2` 仅将公开摘要脱敏调用的参数展开为多行，
-修复敏感扫描对脱敏占位符的误报。修改前后的 Python 逻辑结构完全一致，已知凭据仍然替换为
-`[REDACTED]`，公开确认摘要继续按原规则保留。17 项现有模板与脱敏测试通过；其余发布文件
-与上一轮完整验证的版本相同。源分支与本仓库保持同一干净生成包内容。
-
-扫描覆盖提交历史，本次替换 MR 中命中的提交，并以精确旧提交的 `force-with-lease` 保护远端。
-远端是否通过以新提交的实际检查结果为准。
+原 MR !564 已合并；本轮从最新 `main` 新建 `feat/sms-skill-source-fields` 承接增量。
+提交、推送及检查状态以 Git 和本轮 MR 的实际记录为准。源工作树及其既有未提交说明文件改动保持原样。
+以上为本地离线验证，未验证线上网关透传或指标归类，也未执行真实短信业务操作。
